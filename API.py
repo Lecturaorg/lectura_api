@@ -17,7 +17,7 @@ def extract_keys():
     return cols
 
 def checkDuplicates(newData, data):
-    non_duplicates = data
+    non_duplicates = []#data
     for i in newData:
         keysToCheck = i.keys()
         duplicate = False
@@ -28,16 +28,19 @@ def checkDuplicates(newData, data):
                 if key not in j.keys() or key == "date_uploaded":
                     continue
                 else:
-                    dataNew = str(i[key]).split(", ")
-                    dataOld = str(j[key]).split(", ")
-                    for element in dataNew:
-                        for oldElement in dataOld:
-                            if element == oldElement and element != "":
-                                continue
-                            else: 
-                                stringCheckNew = stringCheckNew + element
-                                stringCheckOld = stringCheckOld + oldElement
-            if stringCheckNew == stringCheckOld: duplicate = True                            
+                    oldValue = j[key]
+                    newValue = i[key]
+                    if isinstance(oldValue,float): oldValue = int(oldValue)
+                    if isinstance(newValue,float): newValue = int(newValue)
+                    oldValue = str(oldValue).split(", ")
+                    newValue = str(newValue).split(", ")
+                    if len(oldValue) == len(newValue):
+                        oldValue = ", ".join(oldValue)
+                        newValue = ", ".join(newValue)
+                    else:
+                        stringCheckNew = stringCheckNew + newValue[0]
+                        stringCheckOld = stringCheckOld + oldValue[0]
+            if stringCheckNew == stringCheckOld: duplicate = True
         if duplicate == False: non_duplicates.append(i)
     return non_duplicates
 
@@ -65,20 +68,34 @@ async def import_data(info: Request, response: Response):
     date_uploaded = req_info["date_uploaded"]
     data = req_info["data"]
     cols = extract_keys()
+    database = open("database.json")
+    database_load = json.load(database)[import_type]
+    database.close()
+    data = checkDuplicates(data,database_load) ##Checks database if it exists
     new_data = []
-    for i in data: 
+    for i in data: ##Adds columns/keys that exists in the database -> formatting needed
         i["date_uploaded"] = date_uploaded
         keysToCheck = cols[import_type]
         for key in keysToCheck:
            if key not in i.keys(): i[key] = ""
+           else: i[key] = i[key]
         new_data.append(i)
-    new_data = checkDuplicates(new_data,import_data)
-    # print(data)
-    with open(file_name, "w") as outfile: json.dump(new_data, outfile)
+    new_data = checkDuplicates(new_data,import_data) #Checks if import already exists
+    if len(new_data)>0: combined = new_data+import_data
+    else: combined = import_data
+    with open(file_name, "w") as outfile: json.dump(combined, outfile)
     return {
         "status" : "SUCCESS",
         "data" : req_info
     }
+
+@app.get("/import_data")
+def data(response: Response, type = None):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    file_name = type+"_import.json"
+    with open(file_name) as json_file: data = json.load(json_file)
+    return data
+
 
 #@app.get("/search")
 #def searchData(item:Item):
