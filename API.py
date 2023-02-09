@@ -2,28 +2,44 @@ from fastapi import FastAPI, Response, Request
 from pydantic import BaseModel
 import json
 import sys
-from pympler.asizeof import asizeof
+#from pympler.asizeof import asizeof
 
-def get_size(obj, seen=None):
-    """Recursively finds size of objects"""
-    size = sys.getsizeof(obj)
-    if seen is None:
-        seen = set()
-    obj_id = id(obj)
-    if obj_id in seen:
-        return 0
-    # Important mark as seen *before* entering recursion to gracefully handle
-    # self-referential objects
-    seen.add(obj_id)
-    if isinstance(obj, dict):
-        size += sum([get_size(v, seen) for v in obj.values()])
-        size += sum([get_size(k, seen) for k in obj.keys()])
-    elif hasattr(obj, '__dict__'):
-        size += get_size(obj.__dict__, seen)
-    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
-        size += sum([get_size(i, seen) for i in obj])
-    return size
+##Get keys of each type -> use keys to find duplicate
+def extract_keys():
+    file = open("database.json")
+    data = json.load(file)
+    cols = {
+        'texts':list(data["texts"][0].keys()),
+        'authors': list(data["authors"][0].keys()),
+        'editions': list(data["editions"][0].keys()),
+    }
+    file.close()
+    return cols
 
+def checkDuplicates(newData, data):
+    non_duplicates = data
+    for i in newData:
+        keysToCheck = i.keys()
+        duplicate = False
+        for j in data:
+            stringCheckNew = ""
+            stringCheckOld = ""
+            for key in keysToCheck: ##Check every key & value
+                if key not in j.keys() or key == "date_uploaded":
+                    continue
+                else:
+                    dataNew = str(i[key]).split(", ")
+                    dataOld = str(j[key]).split(", ")
+                    for element in dataNew:
+                        for oldElement in dataOld:
+                            if element == oldElement and element != "":
+                                continue
+                            else: 
+                                stringCheckNew = stringCheckNew + element
+                                stringCheckOld = stringCheckOld + oldElement
+            if stringCheckNew == stringCheckOld: duplicate = True                            
+        if duplicate == False: non_duplicates.append(i)
+    return non_duplicates
 
 class Item(BaseModel):
     type: str
@@ -41,8 +57,24 @@ def data(response: Response):
 async def import_data(info: Request, response: Response):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     req_info = await info.json()
-    with open("imported_data/"+req_info["name"]+".json", "w") as outfile:
-        json.dump(req_info, outfile)
+    import_type = req_info["type"]
+    file_name = import_type+'_import.json'
+    json_file = open(file_name)
+    import_data = json.load(json_file)
+    json_file.close()
+    date_uploaded = req_info["date_uploaded"]
+    data = req_info["data"]
+    cols = extract_keys()
+    new_data = []
+    for i in data: 
+        i["date_uploaded"] = date_uploaded
+        keysToCheck = cols[import_type]
+        for key in keysToCheck:
+           if key not in i.keys(): i[key] = ""
+        new_data.append(i)
+    new_data = checkDuplicates(new_data,import_data)
+    # print(data)
+    with open(file_name, "w") as outfile: json.dump(new_data, outfile)
     return {
         "status" : "SUCCESS",
         "data" : req_info
