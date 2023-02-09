@@ -44,6 +44,20 @@ def checkDuplicates(newData, data):
         if duplicate == False: non_duplicates.append(i)
     return non_duplicates
 
+def searchDict(data, query):
+    querySplit = query.split(" ")
+    for element in querySplit:
+        results = []
+        for i in data:
+            found = False
+            if found == False:
+                for key in i.keys():
+                    if str(element).lower() in str(i[key]).lower():
+                        if found == False: results.append(i)
+                        found = True
+        data = results
+    return results
+
 class Item(BaseModel):
     type: str
     query: str
@@ -95,6 +109,20 @@ def data(response: Response, type = None):
     file_name = type+"_import.json"
     with open(file_name) as json_file: data = json.load(json_file)
     return data
+
+@app.get("/search")
+def search(response: Response, query, type = None):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    #req_info = await info.json()
+    #if "filters" in req_info.keys():
+    #    return ("filters found")
+    if type == None:
+        with open ("database.json") as json_file: data = json.load(json_file)
+        results = {}
+        for key in ["authors", "texts","editions"]:
+            dataToSearch = data[key]
+            results[key] = searchDict(dataToSearch, query)
+        return results
 
 
 #@app.get("/search")
