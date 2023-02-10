@@ -11,6 +11,26 @@ def data(response: Response):
     with open("database.json") as json_file: data = json.load(json_file)
     return data
 
+@app.post("/edit")
+async def edit_data(info: Request, response: Response, type, id):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    req_info = await info.json()
+    json_file = open("database.json")
+    db_data = json.load(json_file)
+    json_file.close()
+    db_type = db_data[type]
+    row = 0
+    for x in db_type:
+        if x["id"] == int(id): break
+        else: row+=1
+    db_data[type][row] = req_info
+    with open("database.json", "w") as output_file: json.dump(db_data,output_file)
+    return {
+        "status" : "SUCCESS",
+        "data" : req_info
+    }
+
+
 @app.post("/import")
 async def import_data(info: Request, response: Response):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
