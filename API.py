@@ -18,6 +18,7 @@ def extract_keys():
 
 def checkDuplicates(newData, data):
     non_duplicates = []#data
+    index = len(data)
     for i in newData:
         keysToCheck = i.keys()
         duplicate = False
@@ -37,24 +38,30 @@ def checkDuplicates(newData, data):
                     if len(oldValue) == len(newValue):
                         oldValue = ", ".join(oldValue)
                         newValue = ", ".join(newValue)
+                        stringCheckOld = stringCheckOld + oldValue
+                        stringCheckNew = stringCheckNew + newValue
                     else:
                         stringCheckNew = stringCheckNew + newValue[0]
                         stringCheckOld = stringCheckOld + oldValue[0]
-            if stringCheckNew == stringCheckOld: duplicate = True
-        if duplicate == False: non_duplicates.append(i)
+            if stringCheckNew == stringCheckOld and stringCheckNew != "": 
+                duplicate = True
+        if duplicate == False: 
+            i["id"] = index
+            index+= 1
+            non_duplicates.append(i)
     return non_duplicates
 
 def searchDict(data, query):
     querySplit = query.split(" ")
-    for element in querySplit:
+    for j in range(len(querySplit)):
+        element = querySplit[j]
         results = []
         for i in data:
             found = False
-            if found == False:
-                for key in i.keys():
-                    if str(element).lower() in str(i[key]).lower():
-                        if found == False: results.append(i)
-                        found = True
+            for key in i.keys():
+                if str(element).lower() in str(i[key]).lower():
+                    if found == False: results.append(i)
+                    found = True
         data = results
     return results
 
@@ -91,10 +98,16 @@ async def import_data(info: Request, response: Response):
         i["date_uploaded"] = date_uploaded
         keysToCheck = cols[import_type]
         for key in keysToCheck:
-           if key not in i.keys(): i[key] = ""
-           else: i[key] = i[key]
+            if key not in i.keys(): 
+                if key == "label":
+                    if import_type == "texts":
+                        i[key] = i["title"]
+                    elif import_type == "authors":
+                        i[key] = i["name"]
+                else: i[key] = ""
+            else: i[key] = i[key]
         new_data.append(i)
-    new_data = checkDuplicates(new_data,import_data) #Checks if import already exists
+    if len(new_data)!=0: new_data = checkDuplicates(new_data,import_data) #Checks if import already exists
     if len(new_data)>0: combined = new_data+import_data
     else: combined = import_data
     with open(file_name, "w") as outfile: json.dump(combined, outfile)
@@ -102,6 +115,22 @@ async def import_data(info: Request, response: Response):
         "status" : "SUCCESS",
         "data" : req_info
     }
+
+@app.get("/import/approve")
+async def importApproval(type, response: Response):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    file_name = type + "_import.json"
+    with open(file_name) as json_file: importdata = json.load(json_file)
+    with open("database.json") as db_file: db_data = json.load(db_file)
+    dataToChange = db_data[type]
+    non_duplicates = checkDuplicates(importdata, dataToChange)
+    dataToChange = dataToChange+non_duplicates
+    db_data[type] = dataToChange
+    importdata = []
+    with open("database.json","w") as outfile: json.dump(db_data,outfile)
+    with open(file_name,"w") as outfile: json.dump(importdata,outfile)
+    return "Imports have been approved"
+
 
 @app.get("/import_data")
 def data(response: Response, type = None):
@@ -113,9 +142,6 @@ def data(response: Response, type = None):
 @app.get("/search")
 def search(response: Response, query, type = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    #req_info = await info.json()
-    #if "filters" in req_info.keys():
-    #    return ("filters found")
     if type == None:
         with open ("database.json") as json_file: data = json.load(json_file)
         results = {}
@@ -123,15 +149,3 @@ def search(response: Response, query, type = None):
             dataToSearch = data[key]
             results[key] = searchDict(dataToSearch, query)
         return results
-
-
-#@app.get("/search")
-#def searchData(item:Item):
- #   item.query
-# #    if(type is None):
-#         return {"Please enter a type: text, author or edition"}
-#     options = ['texts',
-#                 'authors',
-#                 'editions']
-
- 
