@@ -1,73 +1,7 @@
 from fastapi import FastAPI, Response, Request
-from pydantic import BaseModel
 import json
-import sys
-#from pympler.asizeof import asizeof
-
-##Get keys of each type -> use keys to find duplicate
-def extract_keys():
-    file = open("database.json")
-    data = json.load(file)
-    cols = {
-        'texts':list(data["texts"][0].keys()),
-        'authors': list(data["authors"][0].keys()),
-        'editions': list(data["editions"][0].keys()),
-    }
-    file.close()
-    return cols
-
-def checkDuplicates(newData, data):
-    non_duplicates = []#data
-    index = len(data)
-    for i in newData:
-        keysToCheck = i.keys()
-        duplicate = False
-        for j in data:
-            stringCheckNew = ""
-            stringCheckOld = ""
-            for key in keysToCheck: ##Check every key & value
-                if key not in j.keys() or key == "date_uploaded":
-                    continue
-                else:
-                    oldValue = j[key]
-                    newValue = i[key]
-                    if isinstance(oldValue,float): oldValue = int(oldValue)
-                    if isinstance(newValue,float): newValue = int(newValue)
-                    oldValue = str(oldValue).split(", ")
-                    newValue = str(newValue).split(", ")
-                    if len(oldValue) == len(newValue):
-                        oldValue = ", ".join(oldValue)
-                        newValue = ", ".join(newValue)
-                        stringCheckOld = stringCheckOld + oldValue
-                        stringCheckNew = stringCheckNew + newValue
-                    else:
-                        stringCheckNew = stringCheckNew + newValue[0]
-                        stringCheckOld = stringCheckOld + oldValue[0]
-            if stringCheckNew == stringCheckOld and stringCheckNew != "": 
-                duplicate = True
-        if duplicate == False: 
-            i["id"] = index
-            index+= 1
-            non_duplicates.append(i)
-    return non_duplicates
-
-def searchDict(data, query):
-    querySplit = query.split(" ")
-    for j in range(len(querySplit)):
-        element = querySplit[j]
-        results = []
-        for i in data:
-            found = False
-            for key in i.keys():
-                if str(element).lower() in str(i[key]).lower():
-                    if found == False: results.append(i)
-                    found = True
-        data = results
-    return results
-
-class Item(BaseModel):
-    type: str
-    query: str
+from datetime import datetime
+from validation import extract_keys, checkDuplicates, searchDict
 
 app = FastAPI()
 
@@ -126,6 +60,13 @@ async def importApproval(type, response: Response):
     non_duplicates = checkDuplicates(importdata, dataToChange)
     dataToChange = dataToChange+non_duplicates
     db_data[type] = dataToChange
+    with open("approved_imports.json") as json_file: approved_imports = json.load(json_file)
+    new_approved = {
+        'data': importdata,
+        'date_approved': datetime.today().strftime('%Y-%m-%d')
+    }
+    approved_imports[type].append(new_approved)
+    with open("approved_imports.json","w") as outfile: json.dump(approved_imports,outfile) 
     importdata = []
     with open("database.json","w") as outfile: json.dump(db_data,outfile)
     with open(file_name,"w") as outfile: json.dump(importdata,outfile)
