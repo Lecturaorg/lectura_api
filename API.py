@@ -103,10 +103,14 @@ def data(response: Response, type = None):
 @app.get("/search")
 def search(response: Response, query, type = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    if type == None:
-        with open ("database.json") as json_file: data = json.load(json_file)
-        results = {}
-        for key in ["authors", "texts","editions"]:
-            dataToSearch = data[key]
-            results[key] = searchDict(dataToSearch, query)
-        return results
+    with open ("database.json") as json_file: data = json.load(json_file)
+    results = {}
+    if type == None: keysToCheck = ["authors", "texts", "editions"]
+    else: keysToCheck = [type]
+    for key in keysToCheck:
+        dataToSearch = data[key]
+        result = searchDict(dataToSearch, query)
+        if len(result)>=100: result = result[:100]
+        if type == None: result = [{'label':x["label"],'value':x["value"],'type':x["type"]} for x in result] #only extract type, value & label
+        results[key] = result
+    return results
