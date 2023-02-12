@@ -35,33 +35,35 @@ async def edit_data(info: Request, response: Response, type, id):
 async def import_data(info: Request, response: Response):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     req_info = await info.json()
-    import_type = req_info["type"]
-    file_name = import_type+'_import.json'
-    json_file = open(file_name)
-    import_data = json.load(json_file)
-    json_file.close()
+    importType = req_info["type"]
+    file_name = importType+'_import.json'
+    jsonFile = open(file_name)
+    import_data = json.load(jsonFile)
+    jsonFile.close()
     date_uploaded = req_info["date_uploaded"]
     data = req_info["data"]
-    cols = extract_keys()
+    keysToAddIfNotExists = extract_keys()[importType]
     database = open("database.json")
-    database_load = json.load(database)[import_type]
+    databaseLoad = json.load(database)[importType]
     database.close()
-    data = checkDuplicates(data,database_load) ##Checks database if it exists
+    maxIndex = max(databaseLoad, key=lambda x:x['id'])["id"]+1
+    keys = {'texts': ["title", "author"], "authors": ["name", "birth", "death"], "editions":["title", "author"]} ##Keys to check
+    keysToCheck = keys[importType]
+    data = checkDuplicates(data,databaseLoad, keysToCheck = keysToCheck, index = maxIndex, importType = importType) ##Checks database if it exists
     new_data = []
     for i in data: ##Adds columns/keys that exists in the database -> formatting needed
         i["date_uploaded"] = date_uploaded
-        keysToCheck = cols[import_type]
-        for key in keysToCheck:
+        for key in keysToAddIfNotExists:
             if key not in i.keys(): 
                 if key == "label":
-                    if import_type == "texts":
+                    if importType == "texts":
                         i[key] = i["title"]
-                    elif import_type == "authors":
+                    elif importType == "authors":
                         i[key] = i["name"]
                 else: i[key] = ""
             else: i[key] = i[key]
         new_data.append(i)
-    if len(new_data)!=0: new_data = checkDuplicates(new_data,import_data) #Checks if import already exists
+    if len(new_data)!=0: new_data = checkDuplicates(new_data,import_data, keysToCheck = keysToCheck) #Checks if import already exists
     if len(new_data)>0: combined = new_data+import_data
     else: combined = import_data
     with open(file_name, "w") as outfile: json.dump(combined, outfile)
@@ -70,22 +72,34 @@ async def import_data(info: Request, response: Response):
         "data" : req_info
     }
 
-@app.get("/import/approve")
-async def importApproval(type, response: Response):
+@app.post("/import/approve")
+async def importApproval(type, response: Response, info: Request):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    approved_data = await info.json()
     file_name = type + "_import.json"
-    with open(file_name) as json_file: importdata = json.load(json_file)
     with open("database.json") as db_file: db_data = json.load(db_file)
     dataToChange = db_data[type]
-    non_duplicates = checkDuplicates(importdata, dataToChange)
-    dataToChange = dataToChange+non_duplicates
+    keys = {'texts': ["title", "author"], "authors": ["name", "birth", "death"], "editions":["title", "author"]} ##Keys to check
+    keysToCheck = keys[type]
+    non_duplicates = checkDuplicates(approved_data, dataToChange, keysToCheck = keysToCheck)
+    print(non_duplicates)
+    nonSimilar = []
+    for i in non_duplicates:
+        if type == "authors": duplicateCheck = searchDict(dataToChange,i["name"])
+        elif type == "texts": duplicateCheck = searchDict(dataToChange,i["title"])
+        else: duplicateCheck = searchDict(dataToChange,i["title"])
+        if len(duplicateCheck) == 1:
+            continue
+        elif len(duplicateCheck) == 0:
+            nonSimilar.append(i)
+    dataToChange = dataToChange+nonSimilar
     db_data[type] = dataToChange
     with open("approved_imports.json") as json_file: approved_imports = json.load(json_file)
-    new_approved = {
-        'data': importdata,
+    newApproved = {
+        'data': nonSimilar,
         'date_approved': datetime.today().strftime('%Y-%m-%d')
     }
-    approved_imports[type].append(new_approved)
+    approved_imports[type].append(newApproved)
     with open("approved_imports.json","w") as outfile: json.dump(approved_imports,outfile) 
     importdata = []
     with open("database.json","w") as outfile: json.dump(db_data,outfile)
