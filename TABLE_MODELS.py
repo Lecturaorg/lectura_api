@@ -77,7 +77,7 @@ def engine():
     password = os.getenv("pw")
     host = 'localhost'
     database = 'LECTURA'
-    connection_string = f'mysql+mysqlconnector://{user}:{password}@{host}/{database}?charset=utf8mb4'
+    connection_string = f'postgresql://{user}:{password}@{host}/{database}'
     engine = create_engine(connection_string)
     return engine
 
