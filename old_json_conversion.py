@@ -22,6 +22,7 @@ def insertAuthors(data):
     for i in data:
         name = transformString(i["name"])
         positions = transformString(i["position"])
+        city = i["city"]
         country = i["country"]
         city_death = transformString(i["city_death"])
         country_death = i["country_death"]
@@ -31,11 +32,11 @@ def insertAuthors(data):
         death = stringToInt(i["death"])
         conn.execute(
             """
-            INSERT INTO authors (author_name, author_positions, author_birth_country, author_birth_year,
+            INSERT INTO authors2 (author_name, author_positions, author_birth_city,author_birth_country, author_birth_year, author_death_year,
                                  author_death_city, author_death_country, author_nationality, author_floruit)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (name, positions, country, birth, city_death, country_death, nationality, floruit)
+            (name, positions, city, country, birth, death,city_death, country_death, nationality, floruit)
         )
     conn.close()
 
@@ -96,6 +97,6 @@ def insertEditions(data):
 
 with open ("database.json") as json_file: data = json.load(json_file)
 #print(data["authors"][0:1])
-#insertAuthors(data["authors"])
+insertAuthors(data["authors"])
 #insertTexts(data["texts"])
 #insertEditions(data["editions"])

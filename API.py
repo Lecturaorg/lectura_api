@@ -2,13 +2,32 @@ from fastapi import FastAPI, Response, Request
 import json
 from datetime import datetime
 from validation import extract_keys, checkDuplicates, searchDict
+from table_models import engine
+import pandas as pd
+import numpy as np
 
 app = FastAPI()
 
 @app.get("/data")
-def data(response: Response):
+def data(response: Response, type = None, id = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    with open("database.json") as json_file: data = json.load(json_file)
+    if type != None and id != None:
+        if type == 'texts':
+            query = '''
+                select text_id
+                ,text_title || 
+                    CASE
+                        WHEN TEXT_ORIGINAL_publication_year is null then ''
+                        when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC)'
+                        else ' (' || text_original_publication_year || ' AD)'
+                    end
+                label
+            from texts
+            where author_id =
+            ''' + id
+            texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')#.to_json(orient="table")
+            return texts
+    with open("database_test.json") as json_file: data = json.load(json_file)
     return data
 
 @app.post("/edit")
@@ -24,7 +43,7 @@ async def edit_data(info: Request, response: Response, type, id):
         if x["id"] == int(id): break
         else: row+=1
     db_data[type][row] = req_info
-    with open("database.json", "w") as output_file: json.dump(db_data,output_file)
+    #with open("database.json", "w") as output_file: json.dump(db_data,output_file)
     return {
         "status" : "SUCCESS",
         "data" : req_info
@@ -66,7 +85,7 @@ async def import_data(info: Request, response: Response):
     if len(new_data)!=0: new_data = checkDuplicates(new_data,import_data, keysToCheck = keysToCheck) #Checks if import already exists
     if len(new_data)>0: combined = new_data+import_data
     else: combined = import_data
-    with open(file_name, "w") as outfile: json.dump(combined, outfile)
+    #with open(file_name, "w") as outfile: json.dump(combined, outfile)
     return {
         "status" : "SUCCESS",
         "data" : req_info
@@ -100,10 +119,10 @@ async def importApproval(type, response: Response, info: Request):
         'date_approved': datetime.today().strftime('%Y-%m-%d')
     }
     approved_imports[type].append(newApproved)
-    with open("approved_imports.json","w") as outfile: json.dump(approved_imports,outfile) 
+    #with open("approved_imports.json","w") as outfile: json.dump(approved_imports,outfile) 
     importdata = []
-    with open("database.json","w") as outfile: json.dump(db_data,outfile)
-    with open(file_name,"w") as outfile: json.dump(importdata,outfile)
+    #with open("database.json","w") as outfile: json.dump(db_data,outfile)
+    #with open(file_name,"w") as outfile: json.dump(importdata,outfile)
     return "Imports have been approved"
 
 
@@ -117,7 +136,7 @@ def data(response: Response, type = None):
 @app.get("/search")
 def search(response: Response, query, type = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    with open ("database.json") as json_file: data = json.load(json_file)
+    with open ("database_test.json") as json_file: data = json.load(json_file)
     results = {}
     if type == None: keysToCheck = ["authors", "texts", "editions"]
     else: keysToCheck = [type]
@@ -125,6 +144,6 @@ def search(response: Response, query, type = None):
         dataToSearch = data[key]
         result = searchDict(dataToSearch, query)
         if len(result)>=100: result = result[:100]
-        if type == None: result = [{'label':x["label"],'value':x["value"],'type':x["type"]} for x in result] #only extract type, value & label
+        #if type == None: result = [{'label':x["label"],'value':x["value"],'type':x["type"]} for x in result] #only extract type, value & label
         results[key] = result
     return results
