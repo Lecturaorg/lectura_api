@@ -27,6 +27,34 @@ def data(response: Response, type = None, id = None):
             ''' + id
             texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')#.to_json(orient="table")
             return texts
+        if type == 'editions':
+            query = '''
+                select edition_id
+                ,edition_title
+                ,case 
+                    when edition_publication_year is null then ''
+                    else ' (published ' || edition_publication_year || ')'
+                end
+                ||
+                case
+                    when edition_editor is null then ''
+                    else ' (editors: ' || edition_editor || ')'
+                end
+                ||
+                case
+                    when edition_language is null then ''
+                    else ' (language: ' || edition_language || ')'
+                end
+                ||
+                case
+                    when edition_isbn is null then ''
+                    else ' (ISBN ' || edition_isbn || '/' || edition_isbn13 || ')'
+                end as label
+            from editions
+            where text_id = 
+            ''' + id
+            editions = pd.read_sql(query, con = engine()).replace(np.nan,None).to_dict('records')
+            return editions
     with open("database_test.json") as json_file: data = json.load(json_file)
     return data
 
@@ -40,11 +68,11 @@ async def edit_data(info: Request, response: Response, type, id):
     conn = engine().connect()
     for j in req_info.keys():
         if j == idType: continue
-        if req_info[j] is int: setData = req_info[j]
+        if req_info[j] is int: setData = str(req_info[j])
         else: setData = "'" + req_info[j] + "'"
-        updateString = 'UPDATE ' + type + " SET " + j + " = " + setData + " WHERE " + idType + " = " + str(req_info[idType])
-        conn.execute('''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)'''
-        ,(req_info[idType], idType, j, req_info[j]))
+        updateString = 'UPDATE ' + type + " SET " + j + " = " + setData + " WHERE " + idType + " = " + str(id)
+        #insertDataString = '''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j])
+        conn.execute('''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j]))
         conn.execute(updateString)
     conn.close()
     return {
