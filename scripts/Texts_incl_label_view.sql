@@ -20,13 +20,12 @@ t.text_id
 ,text_original_publication_length_type
 ,text_writing_start
 ,text_writing_end
-,text_title || ' ('  ||
+,text_title || 
 	case
-		when text_original_publication_year is null then '' 
-		when text_original_publication_year <0 then abs(text_original_publication_year)  || ' BC'
-		else text_original_publication_year || ' AD'
+		when text_original_publication_year is null then ' - ' 
+		when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+		else ' (' || text_original_publication_year || ' AD' || ') - '
 	end
-	|| ') - '
 	|| text_author
 	as label
 from texts t;

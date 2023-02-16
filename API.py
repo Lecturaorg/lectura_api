@@ -34,16 +34,19 @@ def data(response: Response, type = None, id = None):
 async def edit_data(info: Request, response: Response, type, id):
     response.headers["Access-Control-Allow-Origin"] = "*"
     req_info = await info.json()
-    json_file = open("database.json")
-    db_data = json.load(json_file)
-    json_file.close()
-    db_type = db_data[type]
-    row = 0
-    for x in db_type:
-        if x["id"] == int(id): break
-        else: row+=1
-    db_data[type][row] = req_info
-    #with open("database.json", "w") as output_file: json.dump(db_data,output_file)
+    if type == "authors": idType = "author_id"
+    elif type == "texts": idType = "text_id"
+    else: idType = "edition_id"
+    conn = engine().connect()
+    for j in req_info.keys():
+        if j == idType: continue
+        if req_info[j] is int: setData = req_info[j]
+        else: setData = "'" + req_info[j] + "'"
+        updateString = 'UPDATE ' + type + " SET " + j + " = " + setData + " WHERE " + idType + " = " + str(req_info[idType])
+        conn.execute('''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)'''
+        ,(req_info[idType], idType, j, req_info[j]))
+        conn.execute(updateString)
+    conn.close()
     return {
         "status" : "SUCCESS",
         "data" : req_info
