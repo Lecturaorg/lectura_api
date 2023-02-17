@@ -54,3 +54,8 @@ def searchDict(data, query):
                     found = True
         data = results
     return results
+
+def mainKeys():
+    return {'texts': ["text_title", "text_author"]
+            , "authors": ["author_name", "author_birth_year", "author_death_year"]
+            , "editions":["edition_title", "edition_author"]} ##Keys to check

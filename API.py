@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Response, Request
 import json
 from datetime import datetime
-from validation import checkDuplicates, searchDict
+from validation import checkDuplicates, searchDict, mainKeys
 from table_models import engine
 import pandas as pd
 import numpy as np
 from main_data import mainData
+from import_approve import approveImport
 
 app = FastAPI()
 
@@ -58,55 +59,26 @@ async def import_data(info: Request, response: Response):
     data = reqInfo["data"]
     databaseData = mainData(type="all")[importType]
     keysToAddIfNotExists = databaseData[0].keys()
-    keys = {'texts': ["text_title", "text_author"]
-            , "authors": ["author_name", "author_birth_year", "author_death_year"]
-            , "editions":["edition_title", "edition_author"]} ##Keys to check
-    keysToCheck = keys[importType]
+    keysToCheck = mainKeys()[importType]
     data = checkDuplicates(data,databaseData, keysToCheck = keysToCheck, importType = importType) ##Checks database if it exists
-    if len(data)!=0: 
-        data = checkDuplicates(data,importData, keysToCheck = keysToCheck) #Checks if import already exists
-        combined = data+importData
+    if len(data)!=0 and len(importData)!=0: 
+        data = checkDuplicates(data,importData, keysToCheck = keysToCheck)
+        combined = importData + data
+    elif len(importData) == 0:
+        combined = data
     else: combined = importData
     with open(fileName, "w") as outfile: json.dump(combined, outfile)
     return {
         "status" : "SUCCESS",
-        "data" : reqInfo
+        "data" : data
     }
 
 @app.post("/import/approve")
 async def importApproval(type, response: Response, info: Request):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    approved_data = await info.json()
-    file_name = type + "_import.json"
-    with open("database.json") as db_file: db_data = json.load(db_file)
-    dataToChange = db_data[type]
-    keys = {'texts': ["title", "author"], "authors": ["name", "birth", "death"], "editions":["title", "author"]} ##Keys to check
-    keysToCheck = keys[type]
-    non_duplicates = checkDuplicates(approved_data, dataToChange, keysToCheck = keysToCheck)
-    print(non_duplicates)
-    nonSimilar = []
-    for i in non_duplicates:
-        if type == "authors": duplicateCheck = searchDict(dataToChange,i["name"])
-        elif type == "texts": duplicateCheck = searchDict(dataToChange,i["title"])
-        else: duplicateCheck = searchDict(dataToChange,i["title"])
-        if len(duplicateCheck) == 1:
-            continue
-        elif len(duplicateCheck) == 0:
-            nonSimilar.append(i)
-    dataToChange = dataToChange+nonSimilar
-    db_data[type] = dataToChange
-    with open("approved_imports.json") as json_file: approved_imports = json.load(json_file)
-    newApproved = {
-        'data': nonSimilar,
-        'date_approved': datetime.today().strftime('%Y-%m-%d')
-    }
-    approved_imports[type].append(newApproved)
-    #with open("approved_imports.json","w") as outfile: json.dump(approved_imports,outfile) 
-    importdata = []
-    #with open("database.json","w") as outfile: json.dump(db_data,outfile)
-    #with open(file_name,"w") as outfile: json.dump(importdata,outfile)
+    approvedData = await info.json()
+    approveImport(approvedData, type)
     return "Imports have been approved"
-
 
 @app.get("/import_data")
 def data(response: Response, type = None):
