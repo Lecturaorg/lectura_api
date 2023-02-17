@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Response, Request
 import json
 from datetime import datetime
-from validation import extract_keys, checkDuplicates, searchDict
+from validation import checkDuplicates, searchDict
 from table_models import engine
 import pandas as pd
 import numpy as np
@@ -50,42 +50,27 @@ async def edit_data(info: Request, response: Response, type, id):
 @app.post("/import")
 async def import_data(info: Request, response: Response):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    req_info = await info.json()
-    importType = req_info["type"]
-    file_name = importType+'_import.json'
-    jsonFile = open(file_name)
-    import_data = json.load(jsonFile)
-    jsonFile.close()
-    date_uploaded = req_info["date_uploaded"]
-    data = req_info["data"]
-    keysToAddIfNotExists = extract_keys()[importType]
-    database = open("database.json")
-    databaseLoad = json.load(database)[importType]
-    database.close()
-    maxIndex = max(databaseLoad, key=lambda x:x['id'])["id"]+1
-    keys = {'texts': ["title", "author"], "authors": ["name", "birth", "death"], "editions":["title", "author"]} ##Keys to check
+    reqInfo = await info.json()
+    importType = reqInfo["type"]
+    fileName = importType+'_import.json'
+    with open (fileName) as jsonFile: importData = json.load(jsonFile)
+    date_uploaded = reqInfo["date_uploaded"]
+    data = reqInfo["data"]
+    databaseData = mainData(type="all")[importType]
+    keysToAddIfNotExists = databaseData[0].keys()
+    keys = {'texts': ["text_title", "text_author"]
+            , "authors": ["author_name", "author_birth_year", "author_death_year"]
+            , "editions":["edition_title", "edition_author"]} ##Keys to check
     keysToCheck = keys[importType]
-    data = checkDuplicates(data,databaseLoad, keysToCheck = keysToCheck, index = maxIndex, importType = importType) ##Checks database if it exists
-    new_data = []
-    for i in data: ##Adds columns/keys that exists in the database -> formatting needed
-        i["date_uploaded"] = date_uploaded
-        for key in keysToAddIfNotExists:
-            if key not in i.keys(): 
-                if key == "label":
-                    if importType == "texts":
-                        i[key] = i["title"]
-                    elif importType == "authors":
-                        i[key] = i["name"]
-                else: i[key] = ""
-            else: i[key] = i[key]
-        new_data.append(i)
-    if len(new_data)!=0: new_data = checkDuplicates(new_data,import_data, keysToCheck = keysToCheck) #Checks if import already exists
-    if len(new_data)>0: combined = new_data+import_data
-    else: combined = import_data
-    #with open(file_name, "w") as outfile: json.dump(combined, outfile)
+    data = checkDuplicates(data,databaseData, keysToCheck = keysToCheck, importType = importType) ##Checks database if it exists
+    if len(data)!=0: 
+        data = checkDuplicates(data,importData, keysToCheck = keysToCheck) #Checks if import already exists
+        combined = data+importData
+    else: combined = importData
+    with open(fileName, "w") as outfile: json.dump(combined, outfile)
     return {
         "status" : "SUCCESS",
-        "data" : req_info
+        "data" : reqInfo
     }
 
 @app.post("/import/approve")

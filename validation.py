@@ -1,17 +1,5 @@
 import json
 
-##Get keys of each type -> use keys to find duplicate
-def extract_keys():
-    file = open("database.json")
-    data = json.load(file)
-    cols = {
-        'texts':list(data["texts"][0].keys()),
-        'authors': list(data["authors"][0].keys()),
-        'editions': list(data["editions"][0].keys()),
-    }
-    file.close()
-    return cols
-
 def checkDuplicates(newData, data, keysToCheck = None, index = None, importType = None):
     '''Checks "newData" for similar data in "data". If keys are not specified, checks all keys'''
     non_duplicates = []#data
@@ -50,13 +38,6 @@ def checkDuplicates(newData, data, keysToCheck = None, index = None, importType 
                 duplicate = True
                 break
         if duplicate == False:
-            for key in ["id", "value", "type", "texts"]:
-                if key not in i.keys():
-                    i["id"] = index
-                    i["value"] = index
-                    i["type"] = importType.replace("s","")
-                    if importType == "authors": i["texts"] = []
-                    index+= 1
             non_duplicates.append(i)
     return non_duplicates
 

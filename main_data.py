@@ -3,10 +3,13 @@ import pandas as pd
 import json
 import numpy as np
 
-def mainData():
+def mainData(type = None):
     eng = engine()
     authorQuery = '''select * from AUTHORS_INCL_LABEL '''
     textQuery = '''select * from texts_incl_label'''
+    if type == "all": 
+        authorQuery = 'select * from authors'
+        textQuery = 'select * from texts'
     editionQuery = '''
     select 
     edition_id
