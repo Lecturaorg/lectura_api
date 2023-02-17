@@ -46,7 +46,7 @@ left join (select distinct
 		   		when author_birth_year>0 then author_birth_year::varchar(255) || ' AD'
 		   	else author_birth_year::varchar(255)
 		   end as author_birth_year_str
-		   from authors) a2 on a2.author_id = a.author_id;
+		   from authors) a2 using(author_id)--on a2.author_id = a.author_id;
 COMMIT;
 
 

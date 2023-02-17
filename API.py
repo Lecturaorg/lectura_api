@@ -5,6 +5,7 @@ from validation import extract_keys, checkDuplicates, searchDict
 from table_models import engine
 import pandas as pd
 import numpy as np
+from main_data import mainData
 
 app = FastAPI()
 
@@ -13,49 +14,14 @@ def data(response: Response, type = None, id = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if type != None and id != None:
         if type == 'texts':
-            query = '''
-                select text_id
-                ,text_title || 
-                    CASE
-                        WHEN TEXT_ORIGINAL_publication_year is null then ''
-                        when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC)'
-                        else ' (' || text_original_publication_year || ' AD)'
-                    end
-                label
-            from texts
-            where author_id =
-            ''' + id
+            query = '''select * from getTexts(''' + id + ')' ##All texts of author_id = id
             texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')#.to_json(orient="table")
             return texts
         if type == 'editions':
-            query = '''
-                select edition_id
-                ,edition_title
-                ,case 
-                    when edition_publication_year is null then ''
-                    else ' (published ' || edition_publication_year || ')'
-                end
-                ||
-                case
-                    when edition_editor is null then ''
-                    else ' (editors: ' || edition_editor || ')'
-                end
-                ||
-                case
-                    when edition_language is null then ''
-                    else ' (language: ' || edition_language || ')'
-                end
-                ||
-                case
-                    when edition_isbn is null then ''
-                    else ' (ISBN ' || edition_isbn || '/' || edition_isbn13 || ')'
-                end as label
-            from editions
-            where text_id = 
-            ''' + id
+            query = '''select * from getEditions(''' + id + ')' #All editions of text_id = id
             editions = pd.read_sql(query, con = engine()).replace(np.nan,None).to_dict('records')
             return editions
-    with open("database_test.json") as json_file: data = json.load(json_file)
+    data = mainData()
     return data
 
 @app.post("/edit")
@@ -167,7 +133,7 @@ def data(response: Response, type = None):
 @app.get("/search")
 def search(response: Response, query, type = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    with open ("database_test.json") as json_file: data = json.load(json_file)
+    data = mainData()
     results = {}
     if type == None: keysToCheck = ["authors", "texts", "editions"]
     else: keysToCheck = [type]
@@ -175,6 +141,5 @@ def search(response: Response, query, type = None):
         dataToSearch = data[key]
         result = searchDict(dataToSearch, query)
         if len(result)>=100: result = result[:100]
-        #if type == None: result = [{'label':x["label"],'value':x["value"],'type':x["type"]} for x in result] #only extract type, value & label
         results[key] = result
     return results
