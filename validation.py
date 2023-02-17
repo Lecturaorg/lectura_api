@@ -41,17 +41,22 @@ def checkDuplicates(newData, data, keysToCheck = None, index = None, importType 
             non_duplicates.append(i)
     return non_duplicates
 
-def searchDict(data, query):
-    querySplit = query.split(" ")
+def searchDict(data, query, delimiter = " "):
+    querySplit = query.split(delimiter)
     for j in range(len(querySplit)):
         element = querySplit[j]
         results = []
         for i in data:
             found = False
             for key in i.keys():
-                if str(element).lower() in str(i[key]).lower():
-                    if found == False: results.append(i)
-                    found = True
+                if delimiter != ", ":
+                    if str(element).lower() in str(i[key]).lower():
+                        if found == False: results.append(i)
+                        found = True
+                else:
+                    if str(element).lower() == str(i[key]).lower():
+                        if found == False: results.append(i)
+                        found = True
         data = results
     return results
 

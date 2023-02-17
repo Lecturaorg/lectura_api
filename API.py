@@ -6,7 +6,7 @@ from table_models import engine
 import pandas as pd
 import numpy as np
 from main_data import mainData
-from import_approve import approveImport
+from importAPI import approveImport, importData
 
 app = FastAPI()
 
@@ -52,22 +52,7 @@ async def edit_data(info: Request, response: Response, type, id):
 async def import_data(info: Request, response: Response):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     reqInfo = await info.json()
-    importType = reqInfo["type"]
-    fileName = importType+'_import.json'
-    with open (fileName) as jsonFile: importData = json.load(jsonFile)
-    date_uploaded = reqInfo["date_uploaded"]
-    data = reqInfo["data"]
-    databaseData = mainData(type="all")[importType]
-    keysToAddIfNotExists = databaseData[0].keys()
-    keysToCheck = mainKeys()[importType]
-    data = checkDuplicates(data,databaseData, keysToCheck = keysToCheck, importType = importType) ##Checks database if it exists
-    if len(data)!=0 and len(importData)!=0: 
-        data = checkDuplicates(data,importData, keysToCheck = keysToCheck)
-        combined = importData + data
-    elif len(importData) == 0:
-        combined = data
-    else: combined = importData
-    with open(fileName, "w") as outfile: json.dump(combined, outfile)
+    data = importData(reqInfo)
     return {
         "status" : "SUCCESS",
         "data" : data

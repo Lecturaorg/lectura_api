@@ -7,27 +7,14 @@ def mainData(type = None):
     eng = engine()
     authorQuery = '''select * from AUTHORS_INCL_LABEL '''
     textQuery = '''select * from texts_incl_label'''
+    editionQuery = '''select e.*, t.text_author, t.text_title from editions e
+                    left join texts t on t.text_id = e.text_id'''
     if type == "all": 
         authorQuery = 'select * from authors'
         textQuery = 'select * from texts'
-    editionQuery = '''
-    select 
-    edition_id
-    ,edition_title
-    ,author_id
-    ,text_id
-    ,edition_editor
-    ,edition_translator
-    ,edition_publisher
-    ,edition_publication_date
-    ,edition_publication_year
-    ,edition_isbn
-    ,edition_isbn13
-    ,edition_length
-    ,edition_language
-    ,edition_binding
-    from editions
-    '''
+        editionQuery = '''select e.*, t.text_author, t.text_title 
+                        from editions e
+                        left join texts t on t.text_id = e.text_id'''
     texts = pd.read_sql(textQuery, con=eng).replace(np.nan, None).to_dict('records')
     authors = pd.read_sql(authorQuery, con=eng).replace(np.nan, None).to_dict('records')
     editions = pd.read_sql(editionQuery, con=eng).replace(np.nan, None).to_dict('records')
