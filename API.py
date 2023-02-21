@@ -25,6 +25,22 @@ def data(response: Response, type = None, id = None):
     data = mainData()
     return data
 
+@app.post("/new")
+async def add_new(info:Request, response:Response, type):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    req_info = await info.json()
+    cols = req_info.keys()
+    vals = []
+    for col in cols:
+        val = req_info[col]
+        if isinstance(val, str): vals.append("'" + val + "'")
+        else: vals.append(str(val))
+    query = 'insert into ' + type + ' (' + ", ".join(cols) + ') VALUES (' + ", ".join(vals) + ")"
+    print(query)
+    #conn = engine().connect()
+    #conn.execute(query)
+    #conn.close()
+
 @app.post("/edit")
 async def edit_data(info: Request, response: Response, type, id):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -32,11 +48,12 @@ async def edit_data(info: Request, response: Response, type, id):
     if type == "authors": idType = "author_id"
     elif type == "texts": idType = "text_id"
     else: idType = "edition_id"
+    print(req_info)
     conn = engine().connect()
     for j in req_info.keys():
         if j == idType: continue
-        if req_info[j] is int: setData = str(req_info[j])
-        else: setData = "'" + req_info[j] + "'"
+        if isinstance(req_info[j],int): setData = str(req_info[j])
+        else: setData = "'" + (req_info[j]) + "'"
         updateString = 'UPDATE ' + type + " SET " + j + " = " + setData + " WHERE " + idType + " = " + str(id)
         #insertDataString = '''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j])
         conn.execute('''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j]))
