@@ -78,6 +78,6 @@ def engine():
     host = 'localhost'
     database = 'LECTURA'
     connection_string = f'postgresql://{user}:{password}@{host}/{database}'
-    engine = create_engine(connection_string, connect_args={"options": "-c statement_timeout=100"})
+    engine = create_engine(connection_string, connect_args={"options": "-c statement_timeout=200"})
     return engine
 

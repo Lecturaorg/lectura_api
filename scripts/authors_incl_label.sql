@@ -3,7 +3,7 @@ DROP VIEW IF EXISTS AUTHORS_INCL_LABEL;
 CREATE VIEW AUTHORS_INCL_LABEL AS
 select 
     a.author_id
-    ,author_name
+/*    ,author_name
     ,author_positions
     ,author_name_language
     ,author_birth_date
@@ -22,31 +22,52 @@ select
     ,author_death_day
     ,author_nationality
     ,author_gender
-    ,author_floruit
+    ,author_floruit*/
 	,'' as texts
-	,split_part(author_name,', ',1) || 
-	case
-		when author_birth_year is null and author_death_year is null and author_floruit is null then ''
-		when author_birth_year is null and author_death_year is null then ' (fl.' || author_floruit || ')'
-		when author_birth_year is null then ' (d.' || author_death_year_str || ')'
-		when author_death_year is null then ' (b.' || author_birth_year_str || ')'
-		else ' (' || abs(author_birth_year) || '-' || author_death_year_str || ')'
-		end
-	as label
+	,CONCAT(
+  SPLIT_PART(author_name, ', ', 1),
+  COALESCE(
+    CASE
+      WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
+      WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', author_floruit, ')')
+      WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
+        COALESCE(
+          CONCAT(ABS(author_death_year)::VARCHAR, ' BC'),
+          author_death_year::VARCHAR
+        ),
+        ')')
+      WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
+        COALESCE(
+          CONCAT(ABS(author_birth_year)::VARCHAR, ' BC'),
+          author_birth_year::VARCHAR
+        ),
+        ')')
+      ELSE CONCAT(' (', ABS(author_birth_year), '-',
+        COALESCE(
+          CONCAT(ABS(author_death_year)::VARCHAR, ' BC'),
+          author_death_year::VARCHAR
+        ),
+        ')')
+    END,
+    ''
+  )
+) AS label
+	,author_added_date
 from authors a
-left join (select distinct 
+where author_birth_year is not null or author_floruit is not null
+/*left join (select distinct 
 		   author_id
 		   , CASE 
-		   		WHEN author_death_year<0 then abs(author_death_year)::varchar(255)|| ' BC'
-		   		when author_death_year>0 then author_death_year::varchar(255) || ' AD'
-		   	else author_death_year::varchar(255)
+		   		WHEN author_death_year<0 then abs(author_death_year)::varchar|| ' BC'
+		   		when author_death_year>0 then author_death_year::varchar || ' AD'
+		   	else author_death_year::varchar
 		   end as author_death_year_str
 		   , CASE 
-		   		WHEN author_birth_year<0 then abs(author_birth_year)::varchar(255)|| ' BC'
-		   		when author_birth_year>0 then author_birth_year::varchar(255) || ' AD'
-		   	else author_birth_year::varchar(255)
+		   		WHEN author_birth_year<0 then abs(author_birth_year)::varchar|| ' BC'
+		   		when author_birth_year>0 then author_birth_year::varchar || ' AD'
+		   	else author_birth_year::varchar
 		   end as author_birth_year_str
-		   from authors) a2 using(author_id)--on a2.author_id = a.author_id;
+		   from authors) a2 using(author_id)*/;--on a2.author_id = a.author_id;
 COMMIT;
 
 
