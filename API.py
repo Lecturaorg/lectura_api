@@ -16,7 +16,7 @@ app = FastAPI()
 @app.get("/data")
 def data(response: Response, type = None, id = None, by = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    if type != None and id != None:
+    if (type != None and id != None):
         if type == 'authors':
             query = '''select * from authors where author_id = ''' + "'" +id + "'"
             author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
@@ -42,8 +42,8 @@ def data(response: Response, type = None, id = None, by = None):
             query = '''select * from getEditions(''' + id + ')' #All editions of text_id = id
             editions = pd.read_sql(query, con = engine()).replace(np.nan,None).to_dict('records')
             return editions
-    else: data = mainData()
-    return data
+    else: results = mainData()
+    return results
 
 @app.post("/new")
 async def add_new(info:Request, response:Response, type):
@@ -156,24 +156,27 @@ def search(response: Response, query, type = None):
     COALESCE(
         CASE
         WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
-        WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', author_floruit, ')')
+        WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
         WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
-            COALESCE(
-            CONCAT(ABS(author_death_year)::VARCHAR, ' BC'),
-            author_death_year::VARCHAR
-            ),
+                CASE 
+                    WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                    ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+				END
+            ,
             ')')
         WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
-            COALESCE(
-            CONCAT(ABS(author_birth_year)::VARCHAR, ' BC'),
-            author_birth_year::VARCHAR
-            ),
+            CASE
+				WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+            	ELSE concat(author_birth_year::VARCHAR, ' AD')
+			END
+            ,
             ')')
         ELSE CONCAT(' (', ABS(author_birth_year), '-',
-            COALESCE(
-            CONCAT(ABS(author_death_year)::VARCHAR, ' BC'),
-            author_death_year::VARCHAR
-            ),
+            CASE 
+				WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+            	ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+			END
+            ,
             ')')
         END,
         ''
@@ -197,8 +200,8 @@ def search(response: Response, query, type = None):
     if type == None: 
         queryList = query.split(' ')
         if len(queryList) == 1:
-            texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(5)#.to_dict('records')
-            authors = pd.read_sql(text(authorQuery.replace("@query",queryList[0])),con=engine()).head(5)
+            texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(10)#.to_dict('records')
+            authors = pd.read_sql(text(authorQuery.replace("@query",queryList[0])),con=engine()).head(10)
             results = pd.concat([texts, authors]).drop_duplicates().to_dict('records')
             return results
         else:

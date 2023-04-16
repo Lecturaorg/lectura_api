@@ -108,6 +108,3 @@ ORDER BY ts_rank_cd(to_tsvector('simple', text_title || ' ' || text_author
 								|| ' ' || text_author_q
 							   ),plainto_tsquery('simple','query')) DESC;
    
-
-
-	
