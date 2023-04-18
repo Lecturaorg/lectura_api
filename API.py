@@ -10,6 +10,7 @@ from importAPI import approveImport, importData
 from comments import import_comments
 import struct
 from sqlalchemy import text
+from urllib.parse import parse_qs
 
 app = FastAPI()
 
@@ -20,7 +21,6 @@ def data(response: Response, type = None, id = None, by = None):
         if type == 'authors':
             query = '''select * from authors where author_id = ''' + "'" +id + "'"
             author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
-            print(author)
             return author
         if type == 'texts':
             if by == "author":
@@ -126,8 +126,9 @@ def data(response: Response, type = None):
     return data
 
 @app.get("/search")
-def search(response: Response, query, type = None):
+def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    params = info.query_params
     textQuery = '''select 
 	text_id as value
     ,'text' as type
@@ -197,7 +198,7 @@ def search(response: Response, query, type = None):
                                     || ' ' || author_name_language
                                     || ' ' || author_q
                                 ), plainto_tsquery('simple', 'query')) DESC;'''
-    if type == None: 
+    if searchtype == None: 
         queryList = query.split(' ')
         if len(queryList) == 1:
             texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(10)#.to_dict('records')
@@ -217,16 +218,39 @@ def search(response: Response, query, type = None):
                     authors = pd.read_sql(text(authorQuery.replace("@query",subQuery)),con=engine())
             results = pd.concat([texts.head(5),authors.head(5)]).drop_duplicates().to_dict('records')
             return results
-    else: keysToCheck = [type]
-    data = mainData()
-    results = {}
-    for key in keysToCheck:
-        dataToSearch = data[key]
-        result = searchDict(dataToSearch, query)
-        if len(result)>=100: result = result[:100]
-        results[key] = result
-    return results
-
+    else:
+        parsed = parse_qs(str(params))
+        filters = json.loads(parsed.get('filters', [''])[0])
+        def find_results(query):
+            queryBase = '''
+            SET statement_timeout = 60000;
+            select 
+                *
+            from authors
+            WHERE 
+            '''
+            variables = searchtype.replace("s","")+"_id"
+            filterString = ""
+            whereClause = "WHERE "
+            for n in range(len(filters)): #varlist should be a body in API request and optional
+                var = filters[n]
+                variables += ","+ var["value"] + ''' "''' + var["label"] + '''" \n''' #Add every search variable
+                if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
+                else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
+            query = queryBase.replace("*", variables).replace("WHERE","WHERE " + filterString).replace("authors",str(searchtype))
+            results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
+            return results
+        queryList = query.split(" ")
+        if len(queryList) == 1: results = find_results(queryList[0]).to_dict('records')
+        else:
+            results = False
+            for subQuery in queryList:
+                if isinstance(results, pd.DataFrame):
+                    newResults = find_results(subQuery)
+                    results = pd.merge(results, newResults, how="inner")
+                else: results = find_results(subQuery)
+            results = results.to_dict('records')
+        return {searchtype:results}
 
 @app.post("/login")
 async def login(response:Response, info:Request):
