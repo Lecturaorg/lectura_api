@@ -62,7 +62,7 @@ left join wikicountries c2 on c2.country = dp.deathplacecountry
 left join wikilanguages l on l.language = a.languages
 --left join (select max(author_id) author_id from authors) author_id on 1=1
 where a.country is not null 
-	and not ("birthdate" is null and floruit is null)
+	--and not ("birthdate" is null and floruit is null)
 group by a.author;
 
 drop table if exists wikitexts_reform;
@@ -201,8 +201,9 @@ where t.text_q = t2.text_q and t.text_q is not null;
 
 --Update existing authors with updated data from wikidata
 UPDATE AUTHORS a
-set author_name = a2.author_name, author_positions = a2.author_positions
-	, author_birth_date = a2.author_birth_date
+set author_name = a2.author_name, author_nationality = a2.author_nationality
+	,author_positions = a2.author_positions
+	,author_birth_date = a2.author_birth_date
 	,author_name_language = a2.author_name_language,
 	author_birth_city = a2.author_birth_city, author_birth_country = a2.author_birth_country,
 	author_death_date = a2.author_death_date, author_death_city = a2.author_death_city,
@@ -228,7 +229,7 @@ select
 ,deathyear as author_death_year
 ,deathmonth::int as author_death_month
 ,deathday::int as author_death_day
-,null as author_nationality
+,country as author_nationality
 ,null as author_gender
 ,floruit as author_floruit
 ,author as author_q
@@ -313,9 +314,17 @@ where t2.text_q is null;
 --Update author_id in texts
 UPDATE texts t
 SET author_id = a.author_id
-FROM authors a
+FROM (SELECT distinct t.text_q, string_agg(a.author_id::varchar(255), ', ') author_id
+	, string_agg(a.author_q, ', ') author_q
+FROM (select text_q
+	  , unnest(string_to_array(text_author_q,', ')) as text_author_q
+	 from texts
+	 ) t
+LEFT JOIN authors a ON a.author_q = t.text_author_q
+group by t.text_q) a
 WHERE a.author_q = t.text_author_q and t.author_id is null and t.text_author_q is not null;
 
+--ALTER TABLE TEXTS ALTER COLUMN author_id TYPE varchar(255)
 /*--Refresh text_id
 CREATE SEQUENCE temp_text_id_seq START 1;
 --SELECT setval('temp_text_id_seq', (SELECT count(text_id) FROM texts));

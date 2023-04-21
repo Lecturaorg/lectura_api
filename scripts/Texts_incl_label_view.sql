@@ -4,9 +4,9 @@ CREATE VIEW TEXTS_INCL_LABEL AS
 select
 t.text_id
 ,author_id
-/*,text_title
+,text_title
 ,text_author
-,author_id author_id
+/*,author_id author_id
 ,text_type
 ,text_genre
 ,text_language

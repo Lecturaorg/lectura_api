@@ -26,6 +26,8 @@ def data(response: Response, type = None, id = None, by = None):
             if by == "author":
                 query = '''select 
                                 text_id
+                                ,text_title
+                                ,text_author
                                 ,text_title || 
                                 case
                                     when text_original_publication_year is null then ' ' 
@@ -234,7 +236,7 @@ def search(info: Request,response: Response, query, searchtype = None):
             whereClause = "WHERE "
             for n in range(len(filters)): #varlist should be a body in API request and optional
                 var = filters[n]
-                variables += ","+ var["value"] + ''' "''' + var["label"] + '''" \n''' #Add every search variable
+                variables += ","+ var["value"] + '''::varchar(255) "''' + var["label"] + '''" \n''' #Add every search variable
                 if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
                 else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
             query = queryBase.replace("*", variables).replace("WHERE","WHERE " + filterString).replace("authors",str(searchtype))
@@ -247,10 +249,10 @@ def search(info: Request,response: Response, query, searchtype = None):
             for subQuery in queryList:
                 if isinstance(results, pd.DataFrame):
                     newResults = find_results(subQuery)
-                    results = pd.merge(results, newResults, how="inner")
+                    results = pd.merge(results, newResults, how="inner").drop_duplicates()
                 else: results = find_results(subQuery)
             results = results.to_dict('records')
-        return {searchtype:results}
+        return results
 
 @app.post("/login")
 async def login(response:Response, info:Request):
