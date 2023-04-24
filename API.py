@@ -59,6 +59,7 @@ def extract_list(response:Response, language=None, country=None):
     ,author_name_language as language
     ,MAX(author_birth_year) author_birth_year
     ,max(author_death_year) author_death_year
+    ,max(author_positions) author_positions
     ,(case
         --when left(min("author_floruit"),4) = 'http' then null
         when left(min("author_floruit"::varchar(255)),1) = '-' then left(min("author_floruit"::varchar(255)),5)
@@ -99,10 +100,13 @@ def extract_list(response:Response, language=None, country=None):
     from authors a
     left join texts t on t.author_id = a.author_id::varchar(255)
     where a.author_nationality ilike '%[country]%' and t.text_language ilike '%[language]%'
+    and a.author_positions not ILIKE '%school inspector%'
     group by a.author_id, author_birth_year, author_death_year, author_floruit,author_nationality,author_name_language
     '''
     if language=="All": language=""
     if country=="All": country=""
+    language = language.replace("'","''")
+    country = country.replace("'","''")
     query = query.replace("[country]", country).replace("[language]",language)
     results = pd.read_sql(text(query), con=engine()).sort_values(by=["texts"],ascending=False).replace(np.nan, None).to_dict('records')
     return results
