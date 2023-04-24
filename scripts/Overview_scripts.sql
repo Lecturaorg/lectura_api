@@ -107,4 +107,62 @@ ORDER BY ts_rank_cd(to_tsvector('simple', text_title || ' ' || text_author
 							   || ' ' || text_q
 								|| ' ' || text_author_q
 							   ),plainto_tsquery('simple','query')) DESC;
-   
+--Find authors with texts
+SELECT 
+	a.author_id as value
+	,author_nationality
+	,author_name_language
+	,MAX(author_birth_year) author_birth_year
+	,max(author_death_year) author_death_year
+	,(case
+		--when left(min("author_floruit"),4) = 'http' then null
+		when left(min("author_floruit"::varchar(255)),1) = '-' then left(min("author_floruit"::varchar(255)),5)
+		else left(min("author_floruit"::varchar(255)),4)
+	end) as floruit
+	,CONCAT(
+    SPLIT_PART(author_name, ', ', 1),
+    COALESCE(
+        CASE
+        WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
+        WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
+        WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
+                CASE 
+                    WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                    ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+				END
+            ,
+            ')')
+        WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
+            CASE
+				WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+            	ELSE concat(author_birth_year::VARCHAR, ' AD')
+			END
+            ,
+            ')')
+        ELSE CONCAT(' (', ABS(author_birth_year), '-',
+            CASE 
+				WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+            	ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+			END
+            ,
+            ')')
+        END,
+        ''
+    )
+    ) AS label
+	,COUNT(DISTINCT t.text_id) texts
+	,SUM(CASE WHEN t.text_q is not null then 1 else 0 end) texts_wiki
+from authors a
+left join texts t on t.author_id = a.author_id::varchar(255)
+group by a.author_id, author_birth_year, author_death_year, author_floruit,author_nationality
+	,author_name_language
+order by texts_wiki desc
+
+select distinct l."languageLabel", count(distinct author) cnt
+from wikilanguages l
+join wikiauthors a on a.languages = l.language
+group by l."languageLabel"
+order by cnt desc
+
+
+
