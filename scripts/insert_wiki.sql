@@ -324,6 +324,27 @@ LEFT JOIN authors a ON a.author_q = t.text_author_q
 group by t.text_q) a
 WHERE a.author_q = t.text_author_q and t.author_id is null and t.text_author_q is not null;
 
+--Find duplicates and label them
+/*select a.author_id
+	,a.author_name
+	,a.author_q
+	,a.author_birth_Year
+	,row_number() over (partition by split_part(a.author_name,',',1), a.author_birth_year order by a.author_q) rn2 
+from authors a
+join (
+select *
+from (
+select distinct 
+	author_id
+	,concat(split_part(author_name,',',1),author_birth_year) m_pattern
+	,row_number() over (partition by split_part(author_name,',',1), author_birth_year order by author_q) rn
+from authors a
+where author_name is not null and author_birth_Year is not null
+	) agg where rn!=1
+) agg2 on agg2.m_pattern = concat(split_part(a.author_name,',',1),author_birth_Year)
+*/
+
+
 --ALTER TABLE TEXTS ALTER COLUMN author_id TYPE varchar(255)
 /*--Refresh text_id
 CREATE SEQUENCE temp_text_id_seq START 1;

@@ -57,6 +57,7 @@ def extract_list(response:Response, language=None, country=None):
     a.author_id as author_id
     ,author_nationality as nationality
     ,author_name_language as language
+    ,MAX(author_q) as author_q
     ,MAX(author_birth_year) author_birth_year
     ,max(author_death_year) author_death_year
     ,max(author_positions) author_positions
@@ -98,13 +99,14 @@ def extract_list(response:Response, language=None, country=None):
     ) AS label
     ,COUNT(DISTINCT t.text_id) texts
     from authors a
-    left join texts t on t.author_id = a.author_id::varchar(255)
-    where a.author_nationality ilike '%[country]%' and t.text_language ilike '%[language]%'
+    join texts t on t.author_id = a.author_id::varchar(255)
+    where a.author_nationality ilike '%[country]%' and (t.text_language ilike '%[language]%' 
+    or (t.text_language is null and a.author_name_language = '[language]')) 
     and a.author_positions not ILIKE '%school inspector%'
     group by a.author_id, author_birth_year, author_death_year, author_floruit,author_nationality,author_name_language
     '''
     if language=="All": language=""
-    if country=="All": country=""
+    if country=="All": query = query.replace("a.author_nationality ilike '%[country]%' and ", "")
     language = language.replace("'","''")
     country = country.replace("'","''")
     query = query.replace("[country]", country).replace("[language]",language)
@@ -268,21 +270,21 @@ def search(info: Request,response: Response, query, searchtype = None):
     if searchtype == None: 
         queryList = query.split(' ')
         if len(queryList) == 1:
-            texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(10)#.to_dict('records')
             authors = pd.read_sql(text(authorQuery.replace("@query",queryList[0])),con=engine()).head(10)
+            texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(10)#.to_dict('records')
             results = pd.concat([texts, authors]).drop_duplicates().to_dict('records')
             return results
         else:
             texts = False; authors = False
             for subQuery in queryList:
                 if isinstance(texts, pd.DataFrame) and isinstance(authors, pd.DataFrame):
-                    newTexts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
-                    texts = pd.merge(texts,newTexts, how="inner")
                     newAuthors = pd.read_sql(text(authorQuery.replace("@query",subQuery)),con=engine())
                     authors = pd.merge(authors, newAuthors, how="inner")
+                    newTexts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
+                    texts = pd.merge(texts,newTexts, how="inner")
                 else:
-                    texts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
                     authors = pd.read_sql(text(authorQuery.replace("@query",subQuery)),con=engine())
+                    texts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
             results = pd.concat([texts.head(5),authors.head(5)]).drop_duplicates().to_dict('records')
             return results
     else:

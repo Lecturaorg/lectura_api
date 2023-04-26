@@ -154,15 +154,29 @@ SELECT
 	,SUM(CASE WHEN t.text_q is not null then 1 else 0 end) texts_wiki
 from authors a
 left join texts t on t.author_id = a.author_id::varchar(255)
+where a.author_nationality like '%%'
 group by a.author_id, author_birth_year, author_death_year, author_floruit,author_nationality
 	,author_name_language
 order by texts_wiki desc
 
-select distinct l."languageLabel", count(distinct author) cnt
+--Languages
+select distinct l."languageLabel", concat(',"', l."languageLabel", '"'),count(distinct book) cnt
 from wikilanguages l
 join wikiauthors a on a.languages = l.language
+join wikitexts t on t.author = a.author
+join texts t2 on t2.text_q = t.book
 group by l."languageLabel"
 order by cnt desc
 
+--Country
+select c."countryLabel", concat(',"', c."countryLabel", '"'), count(distinct book) cnt
+from wikicountries c
+join wikiauthors a on concat('http://www.wikidata.org/entity/',a."countryQ") = c.country
+join wikitexts t on t.author = a.author
+join texts t2 on t2.text_q = t.book
+group by c."countryLabel"
+order by cnt desc
+
+select * from authors
 
 
