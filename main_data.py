@@ -19,7 +19,7 @@ def mainData(type = None, limit = None):
         authorQuery = authorQuery.replace("5",limit)
         textQuery = textQuery.replace("5",limit)
     if type == "all": 
-        authorQuery = 'select * from authors'
+        authorQuery = 'select * from authors '
         textQuery = 'select * from texts'
         editionQuery = '''select e.*, t.text_author, t.text_title 
                         from editions e

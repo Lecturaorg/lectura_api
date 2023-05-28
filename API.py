@@ -25,16 +25,17 @@ def data(response: Response, type = None, id = None, by = None):
             return author
         if type == 'texts':
             if by == "author":
-                query = '''select 
+                query = '''SET statement_timeout = 60000;select 
                                 text_id
-                                ,text_title
+                                ,text_title as "titleLabel"
                                 ,text_author
+                                ,text_q
                                 ,text_title || 
                                 case
                                     when text_original_publication_year is null then ' ' 
                                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') '
                                     else ' (' || text_original_publication_year || ' AD' || ') '
-                                end as label
+                                end as "bookLabel"
                             from texts where author_id = ''' + "'" +id + "'"
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
             else:
@@ -198,9 +199,11 @@ def data(response: Response, type = None):
 def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     params = info.query_params
+    query = query.replace("'","''")
     textQuery = '''SET statement_timeout = 60000;select 
 	text_id as value
     ,'text' as type
+    ,a.author_id::varchar(255) as author_id
 	,text_title || 
 	case
 		when text_original_publication_year is null then ' - ' 
@@ -209,11 +212,12 @@ def search(info: Request,response: Response, query, searchtype = None):
 	end
 	|| coalesce(text_author,'Unknown')
 	as label
-    from texts
-    WHERE text_title ILIKE '%@query%'
-        OR text_author ILIKE '%@query%'
-        OR text_q ILIKE '%@query%'
-        OR text_author_q ILIKE '%@query%'
+    from texts t
+    left join authors a on a.author_q = t.text_author_q
+    WHERE text_title ILIKE %(query)s
+        OR text_author ILIKE %(query)s
+        OR text_q ILIKE %(query)s
+        OR text_author_q ILIKE %(query)s
     ORDER BY ts_rank_cd(to_tsvector('simple', text_title || ' ' || text_author
                                 || ' ' || text_q
                                     || ' ' || text_author_q
@@ -221,6 +225,7 @@ def search(info: Request,response: Response, query, searchtype = None):
     authorQuery = '''SET statement_timeout = 60000;SELECT 
 	author_id as value
     ,'author' as type
+    ,null as author_id
 	,CONCAT(
     SPLIT_PART(author_name, ', ', 1),
     COALESCE(
@@ -253,13 +258,13 @@ def search(info: Request,response: Response, query, searchtype = None):
     )
     ) AS label
     FROM authors
-    WHERE author_name ILIKE '%@query%'
-    OR author_nationality ILIKE '%@query%'
-    OR author_positions ILIKE '%@query%'
-    OR author_birth_city ILIKE '%@query%'
-    OR author_birth_country ILIKE '%@query%'
-    OR author_name_language ILIKE '%@query%'
-    OR author_q ILIKE '%@query%'
+    WHERE (author_name ILIKE %(query)s
+    OR author_nationality ILIKE %(query)s
+    OR author_positions ILIKE %(query)s
+    OR author_birth_city ILIKE %(query)s
+    OR author_birth_country ILIKE %(query)s
+    OR author_name_language ILIKE %(query)s
+    OR author_q ILIKE %(query)s)
     ORDER BY ts_rank_cd(to_tsvector('simple', author_name || ' ' || author_nationality 
                                     || ' ' || author_positions
                                     || ' ' || author_birth_city
@@ -267,24 +272,27 @@ def search(info: Request,response: Response, query, searchtype = None):
                                     || ' ' || author_name_language
                                     || ' ' || author_q
                                 ), plainto_tsquery('simple', 'query')) DESC;'''
+    search_params = {"query": f"%{query}%"}
     if searchtype == None: 
         queryList = query.split(' ')
         if len(queryList) == 1:
-            authors = pd.read_sql(text(authorQuery.replace("@query",queryList[0])),con=engine()).head(10)
-            texts = pd.read_sql(text(textQuery.replace("@query",queryList[0])), con=engine()).head(10)#.to_dict('records')
+            print("Executed query:")
+            print(authorQuery % search_params)
+            authors = pd.read_sql(authorQuery,con=engine(), params=search_params).head(10)
+            texts = pd.read_sql(textQuery, con=engine(), params=search_params).head(10)#.to_dict('records')
             results = pd.concat([texts, authors]).drop_duplicates().to_dict('records')
             return results
         else:
             texts = False; authors = False
             for subQuery in queryList:
                 if isinstance(texts, pd.DataFrame) and isinstance(authors, pd.DataFrame):
-                    newAuthors = pd.read_sql(text(authorQuery.replace("@query",subQuery)),con=engine())
+                    newAuthors = pd.read_sql(authorQuery,con=engine(), params=search_params)
                     authors = pd.merge(authors, newAuthors, how="inner")
-                    newTexts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
+                    newTexts = pd.read_sql(textQuery, con=engine(),params=search_params)
                     texts = pd.merge(texts,newTexts, how="inner")
                 else:
-                    authors = pd.read_sql(text(authorQuery.replace("@query",subQuery)),con=engine())
-                    texts = pd.read_sql(text(textQuery.replace("@query",subQuery)), con=engine())
+                    authors = pd.read_sql(authorQuery,con=engine(),params=search_params)
+                    texts = pd.read_sql(textQuery, con=engine(), params=search_params)
             results = pd.concat([texts.head(5),authors.head(5)]).drop_duplicates().to_dict('records')
             return results
     else:
@@ -296,7 +304,7 @@ def search(info: Request,response: Response, query, searchtype = None):
             select 
                 *
             from authors
-            WHERE 
+            WHERE  
             '''
             variables = searchtype.replace("s","")+"_id"
             filterString = ""
@@ -306,7 +314,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                 variables += ","+ var["value"] + '''::varchar(255) "''' + var["label"] + '''" \n''' #Add every search variable
                 if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
                 else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
-            query = queryBase.replace("*", variables).replace("WHERE","WHERE " + filterString).replace("authors",str(searchtype))
+            query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString).replace("authors",str(searchtype))
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
         queryList = query.split(" ")

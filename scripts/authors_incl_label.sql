@@ -30,7 +30,7 @@ select
         CASE
         WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
         WHEN author_birth_year IS NULL AND author_death_year IS NULL 
-			THEN CONCAT(' (fl.', abs(left(author_floruit,4)), ' BC)')
+			THEN CONCAT(' (fl.', left(author_floruit,4), ' BC)')
         WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
                 CASE 
                     WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
@@ -59,6 +59,7 @@ select
 	,author_added_date
 from authors a
 where author_birth_year is not null or author_floruit is not null
+and author_duplicate is null
 /*left join (select distinct 
 		   author_id
 		   , CASE 

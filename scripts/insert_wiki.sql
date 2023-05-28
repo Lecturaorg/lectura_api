@@ -203,47 +203,50 @@ where t.text_q = t2.text_q and t.text_q is not null;
 UPDATE AUTHORS a
 set author_name = a2.author_name, author_nationality = a2.author_nationality
 	,author_positions = a2.author_positions
+	,author_name_language = a2.author_name_language
 	,author_birth_date = a2.author_birth_date
-	,author_name_language = a2.author_name_language,
-	author_birth_city = a2.author_birth_city, author_birth_country = a2.author_birth_country,
+	,author_birth_city = a2.author_birth_city, author_birth_country = a2.author_birth_country,
 	author_death_date = a2.author_death_date, author_death_city = a2.author_death_city,
 	author_death_country = a2.author_death_country, author_death_year = a2.author_death_year,
 	author_death_month = a2.author_death_month, author_death_day = a2.author_death_day,
 	author_floruit = a2.author_floruit
 from (
 select 
-"authorLabel" as author_name
-,occupations as author_positions
-,languages as author_name_language
-,birthdate as author_birth_date
-,birthplace as author_birth_city
-,birthcountry as author_birth_country
-,null as author_birth_coordinates
-,birthyear as author_birth_year
-,birthmonth::int as author_birth_month
-,birthday::int as author_birth_day
-,deathdate as author_death_date
-,deathplace as author_death_city
-,deathcountry as author_death_country
-,null as author_death_coordinates
-,deathyear as author_death_year
-,deathmonth::int as author_death_month
-,deathday::int as author_death_day
-,country as author_nationality
-,null as author_gender
-,floruit as author_floruit
+coalesce("authorLabel",author_name) as author_name
+,coalesce(country,author_nationality) as author_nationality
+,coalesce(occupations, author_positions) as author_positions
+,coalesce(languages, author_name_language) as author_name_language
+,coalesce(birthdate, author_birth_date) as author_birth_date
+,coalesce(birthplace, author_birth_city) as author_birth_city
+,coalesce(birthcountry, author_birth_country) as author_birth_country
+,coalesce(birthyear,author_birth_year) as author_birth_year
+,coalesce(birthmonth::int, author_birth_month) as author_birth_month
+,coalesce(birthday::int,author_birth_day) as author_birth_day
+,coalesce(deathdate,author_death_date) as author_death_date
+,coalesce(deathplace,author_death_city) as author_death_city
+,coalesce(deathcountry,author_death_country) as author_death_country
+,coalesce(deathyear,author_death_year) as author_death_year
+,coalesce(deathmonth::int,author_death_month) as author_death_month
+,coalesce(deathday::int,author_death_day) as author_death_day
+,case 
+	when coalesce(floruit,author_floruit) like '%http://www.wikidata.org/.well-known/genid%' then null 
+	else coalesce(floruit,author_floruit) 
+end as author_floruit
 ,author as author_q
-from wikiauthors_reform) a2
+from wikiauthors_reform a
+left join authors a2 on a2.author_q = a.author
+where coalesce("authorLabel",author_name) is not null
+) a2
 where a2.author_q = a.author_q and a.author_q is not null;
 
 --Insert authors that do not exist in the author table from wikireformat
 INSERT INTO AUTHORS (author_name,author_positions,author_name_language
 					 ,author_birth_date,author_birth_city
-					 ,author_birth_country,author_birth_coordinates
+					 ,author_birth_country
 					 ,author_birth_year,author_birth_month,author_birth_day
 					 ,author_death_date,author_death_city,author_death_country
-					 ,author_death_coordinates,author_death_year,author_death_month
-					 ,author_death_day,author_nationality,author_gender
+					 ,author_death_year,author_death_month
+					 ,author_death_day,author_nationality
 					 ,author_floruit,author_q)
 select 
 "authorLabel" as author_name
@@ -252,19 +255,16 @@ select
 ,birthdate as author_birth_date
 ,birthplace as author_birth_city
 ,birthcountry as author_birth_country
-,null as author_birth_coordinates
 ,birthyear as author_birth_year
 ,birthmonth::int as author_birth_month
 ,birthday::int as author_birth_day
 ,deathdate as author_death_date
 ,deathplace as author_death_city
 ,deathcountry as author_death_country
-,null as author_death_coordinates
 ,deathyear as author_death_year
 ,deathmonth::int as author_death_month
 ,deathday::int as author_death_day
-,null as author_nationality
-,null as author_gender
+,country as author_nationality
 ,floruit as author_floruit
 ,author as author_q
 from wikiauthors_reform a
@@ -276,10 +276,7 @@ INSERT INTO TEXTS
 		(text_title,text_author,author_id,text_type,text_genre,text_language
 		 ,text_original_publication_date,text_original_publication_year
 		 ,text_original_publication_month,text_original_publication_day
-		 ,text_original_publication_publisher,text_original_publication_publisher_loc
-		 ,text_original_publication_type,text_original_publication_length
-		 ,text_original_publication_length_type,text_writing_start
-		 ,text_writing_end,text_q,text_author_q)
+		,text_q,text_author_q)
 select 
 	coalesce(CASE 
 			 	WHEN title like '%http://www.wikidata.org/.well-known%' then "bookLabel"
@@ -298,13 +295,6 @@ select
 	,publ_year as text_original_publication_year
 	,publ_month as text_original_publication_month
 	,publ_day as text_original_publication_day
-	,null as text_original_publication_publisher
-	,null as text_original_publication_publisher_loc
-	,null as text_original_publication_type
-	,null as text_original_publication_length
-	,null as text_original_publication_length_type
-	,null as text_writing_start
-	,null as text_writing_end
 	,book as text_q
 	,authorq as text_author_q
 from wikitexts_reform t
@@ -325,26 +315,55 @@ group by t.text_q) a
 WHERE a.author_q = t.text_author_q and t.author_id is null and t.text_author_q is not null;
 
 --Find duplicates and label them
-/*select a.author_id
-	,a.author_name
-	,a.author_q
-	,a.author_birth_Year
-	,row_number() over (partition by split_part(a.author_name,',',1), a.author_birth_year order by a.author_q) rn2 
-from authors a
-join (
+	--Author duplicates
+/*UPDATE authors a
+set author_duplicate = 1
+FROM
+(
 select *
 from (
 select distinct 
 	author_id
 	,concat(split_part(author_name,',',1),author_birth_year) m_pattern
-	,row_number() over (partition by split_part(author_name,',',1), author_birth_year order by author_q) rn
+	,row_number() over (partition by split_part(author_name,', ',1), author_birth_year order by author_q) rn
 from authors a
 where author_name is not null and author_birth_Year is not null
 	) agg where rn!=1
-) agg2 on agg2.m_pattern = concat(split_part(a.author_name,',',1),author_birth_Year)
+) dupl
+where a.author_duplicate is null and a.author_id = dupl.author_id;*/
+
+	--Text duplicates
+/*select distinct concat(t.text_title, split_part(t.text_author,', ',1)) m_pattern
+from texts t
+join (
+select distinct
+	text_id
+	,text_q
+	,concat(text_title, split_part(text_author,', ',1)) m_pattern
+	,row_number() over (partition by text_title, split_part(text_author,', ',1) order by text_q desc) rn
+from texts
+	) t2 on m_pattern = concat(t.text_title, split_part(t.text_author,', ',1))
+where rn>1*/
+
+--Add duplicates to authors_duplicate
+/*INSERT INTO authors_duplicate
+select *
+from authors
+where author_duplicate is not null;
+--Remove duplicates from authors
+DELETE FROM authors
+where author_duplicate is not null;
+--Add texts that is on duplicate authors to texts_duplicate
+INSERT INTO texts_duplicate
+SELECT
+t.*
+from texts t
+join authors_duplicate a on a.author_id::varchar(255) = t.author_id;
+--Remove texts that is on duplicate authors from texts
+delete from texts t
+USING authors_duplicate a
+where t.author_id::varchar(255) = a.author_id::varchar(255);
 */
-
-
 --ALTER TABLE TEXTS ALTER COLUMN author_id TYPE varchar(255)
 /*--Refresh text_id
 CREATE SEQUENCE temp_text_id_seq START 1;
