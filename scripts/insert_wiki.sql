@@ -217,13 +217,19 @@ coalesce("authorLabel",author_name) as author_name
 ,coalesce(occupations, author_positions) as author_positions
 ,coalesce(languages, author_name_language) as author_name_language
 ,coalesce(birthdate, author_birth_date) as author_birth_date
-,coalesce(birthplace, author_birth_city) as author_birth_city
+,case
+	when coalesce(birthplace, author_birth_city) like '%http://www.wikidata.org/.well-known/genid%' then null
+	else coalesce(birthplace, author_birth_city) 
+	end as author_birth_city
 ,coalesce(birthcountry, author_birth_country) as author_birth_country
 ,coalesce(birthyear,author_birth_year) as author_birth_year
 ,coalesce(birthmonth::int, author_birth_month) as author_birth_month
 ,coalesce(birthday::int,author_birth_day) as author_birth_day
 ,coalesce(deathdate,author_death_date) as author_death_date
-,coalesce(deathplace,author_death_city) as author_death_city
+,case
+	when coalesce(deathplace,author_death_city) like '%http://www.wikidata.org/.well-known/genid%' then null
+	else coalesce(deathplace,author_death_city) 
+	end as author_death_city
 ,coalesce(deathcountry,author_death_country) as author_death_country
 ,coalesce(deathyear,author_death_year) as author_death_year
 ,coalesce(deathmonth::int,author_death_month) as author_death_month

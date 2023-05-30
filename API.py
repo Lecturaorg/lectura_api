@@ -200,33 +200,35 @@ def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     params = info.query_params
     query = query.replace("'","''")
-    textQuery = '''SET statement_timeout = 60000;select 
-	text_id as value
-    ,'text' as type
-    ,a.author_id::varchar(255) as author_id
-	,text_title || 
-	case
-		when text_original_publication_year is null then ' - ' 
-		when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
-		else ' (' || text_original_publication_year || ' AD' || ') - '
-	end
-	|| coalesce(text_author,'Unknown')
-	as label
-    from texts t
-    left join authors a on a.author_q = t.text_author_q
-    WHERE text_title ILIKE %(query)s
-        OR text_author ILIKE %(query)s
-        OR text_q ILIKE %(query)s
-        OR text_author_q ILIKE %(query)s
-    ORDER BY ts_rank_cd(to_tsvector('simple', text_title || ' ' || text_author
-                                || ' ' || text_q
-                                    || ' ' || text_author_q
-                                ),plainto_tsquery('simple','query')) DESC'''
-    authorQuery = '''SET statement_timeout = 60000;SELECT 
-	author_id as value
+    allQuery = '''SET statement_timeout = 60000;
+    select 
+        value
+        ,type
+        ,a.author_id::varchar(255) as author_id
+        ,label
+    from (
+    select 
+        text_id as value
+        ,'text' as type
+        ,text_title || 
+        case
+            when text_original_publication_year is null then ' - ' 
+            when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+            else ' (' || text_original_publication_year || ' AD' || ') - '
+        end
+        || coalesce(text_author,'Unknown')
+        as label
+        ,text_author_q
+        from texts t
+    WHERE to_tsvector('english', immutable_concat_ws('',ARRAY[text_title,text_author])) @@ plainto_tsquery('english', %(query)s) 
+    ) t
+    left join (select distinct author_q, author_id from authors) a on a.author_q = t.text_author_q
+    UNION ALL
+    select 
+    author_id as value
     ,'author' as type
     ,null as author_id
-	,CONCAT(
+    ,CONCAT(
     SPLIT_PART(author_name, ', ', 1),
     COALESCE(
         CASE
@@ -236,21 +238,21 @@ def search(info: Request,response: Response, query, searchtype = None):
                 CASE 
                     WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
                     ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-				END
+                END
             ,
             ')')
         WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
             CASE
-				WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
-            	ELSE concat(author_birth_year::VARCHAR, ' AD')
-			END
+                WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+                ELSE concat(author_birth_year::VARCHAR, ' AD')
+            END
             ,
             ')')
         ELSE CONCAT(' (', ABS(author_birth_year), '-',
             CASE 
-				WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-            	ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-			END
+                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+            END
             ,
             ')')
         END,
@@ -258,44 +260,26 @@ def search(info: Request,response: Response, query, searchtype = None):
     )
     ) AS label
     FROM authors
-    WHERE (author_name ILIKE %(query)s
-    OR author_nationality ILIKE %(query)s
-    OR author_positions ILIKE %(query)s
-    OR author_birth_city ILIKE %(query)s
-    OR author_birth_country ILIKE %(query)s
-    OR author_name_language ILIKE %(query)s
-    OR author_q ILIKE %(query)s)
-    ORDER BY ts_rank_cd(to_tsvector('simple', author_name || ' ' || author_nationality 
-                                    || ' ' || author_positions
-                                    || ' ' || author_birth_city
-                                    || ' ' || author_birth_country
-                                    || ' ' || author_name_language
-                                    || ' ' || author_q
-                                ), plainto_tsquery('simple', 'query')) DESC;'''
+    WHERE to_tsvector('english', immutable_concat_ws(' ', ARRAY[coalesce(author_name,''), coalesce(author_nationality,''), coalesce(author_positions,''), coalesce(author_birth_city,''), coalesce(author_birth_country,''), coalesce(author_name_language,'')])) @@ plainto_tsquery('english', %(query)s) 
+    '''
     search_params = {"query": f"%{query}%"}
-    if searchtype == None: 
+    if searchtype == None:
         queryList = query.split(' ')
         if len(queryList) == 1:
-            print("Executed query:")
-            print(authorQuery % search_params)
-            authors = pd.read_sql(authorQuery,con=engine(), params=search_params).head(10)
-            texts = pd.read_sql(textQuery, con=engine(), params=search_params).head(10)#.to_dict('records')
-            results = pd.concat([texts, authors]).drop_duplicates().to_dict('records')
+            results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates().to_dict("records")
             return results
         else:
-            texts = False; authors = False
+            print(queryList)
+            results = False#texts = False; authors = False
             for subQuery in queryList:
-                if isinstance(texts, pd.DataFrame) and isinstance(authors, pd.DataFrame):
-                    newAuthors = pd.read_sql(authorQuery,con=engine(), params=search_params)
-                    authors = pd.merge(authors, newAuthors, how="inner")
-                    newTexts = pd.read_sql(textQuery, con=engine(),params=search_params)
-                    texts = pd.merge(texts,newTexts, how="inner")
-                else:
-                    authors = pd.read_sql(authorQuery,con=engine(),params=search_params)
-                    texts = pd.read_sql(textQuery, con=engine(), params=search_params)
-            results = pd.concat([texts.head(5),authors.head(5)]).drop_duplicates().to_dict('records')
+                search_params["query"]=f"%{subQuery}%"
+                if isinstance(results, pd.DataFrame):
+                    newResults = pd.read_sql(allQuery,con=engine(),params=search_params)
+                    results = pd.merge(results,newResults,how="inner")
+                else: results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates()
+            results = results.to_dict('records'); #.head(5)
             return results
-    else:
+    else: ###Detailed search by type
         parsed = parse_qs(str(params))
         filters = json.loads(parsed.get('filters', [''])[0])
         def find_results(query):
@@ -315,6 +299,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                 if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
                 else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
             query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString).replace("authors",str(searchtype))
+            print(query)
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
         queryList = query.split(" ")
