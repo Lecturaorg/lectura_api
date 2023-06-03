@@ -6,7 +6,7 @@ from table_models import engine
 import pandas as pd
 import numpy as np
 from main_data import mainData
-from importAPI import approveImport, importData
+from importAPI import approveImport, importData, read_sql
 from comments import import_comments
 import struct
 from sqlalchemy import text
@@ -50,68 +50,20 @@ def data(response: Response, type = None, id = None, by = None):
     return results
 
 @app.get("/lists")
-def extract_list(response:Response, language=None, country=None):
+def extract_list(response:Response, language=None, country=None, query_type=None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    query = '''
-    SET statement_timeout = 60000; 
-    SELECT 
-    a.author_id as author_id
-    ,author_nationality as nationality
-    ,author_name_language as language
-    ,MAX(author_q) as author_q
-    ,MAX(author_birth_year) author_birth_year
-    ,max(author_death_year) author_death_year
-    ,max(author_positions) author_positions
-    ,(case
-        --when left(min("author_floruit"),4) = 'http' then null
-        when left(min("author_floruit"::varchar(255)),1) = '-' then left(min("author_floruit"::varchar(255)),5)
-        else left(min("author_floruit"::varchar(255)),4)
-    end) as floruit
-    ,CONCAT(
-    SPLIT_PART(author_name, ', ', 1),
-    COALESCE(
-        CASE
-        WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
-        WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
-        WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
-                CASE 
-                    WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                    ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-                END
-            ,
-            ')')
-        WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
-            CASE
-                WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
-                ELSE concat(author_birth_year::VARCHAR, ' AD')
-            END
-            ,
-            ')')
-        ELSE CONCAT(' (', ABS(author_birth_year), '-',
-            CASE 
-                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-            END
-            ,
-            ')')
-        END,
-        ''
-    )
-    ) AS label
-    ,COUNT(DISTINCT t.text_id) texts
-    from authors a
-    join texts t on t.author_id = a.author_id::varchar(255)
-    where a.author_nationality ilike '%[country]%' and (t.text_language ilike '%[language]%' 
-    or (t.text_language is null and a.author_name_language = '[language]')) 
-    and a.author_positions not ILIKE '%school inspector%'
-    group by a.author_id, author_birth_year, author_death_year, author_floruit,author_nationality,author_name_language
-    '''
+    queries = {'num_books':"/Users/tarjeisandsnes/lectura_api/API_queries/texts_by_author.sql",
+                'no_books':"/Users/tarjeisandsnes/lectura_api/API_queries/authors_without_text.sql"}
+    query = read_sql(queries[query_type])
     if language=="All": language=""
     if country=="All": query = query.replace("a.author_nationality ilike '%[country]%' and ", "")
     language = language.replace("'","''")
     country = country.replace("'","''")
     query = query.replace("[country]", country).replace("[language]",language)
-    results = pd.read_sql(text(query), con=engine()).sort_values(by=["texts"],ascending=False).replace(np.nan, None).to_dict('records')
+    results = pd.read_sql(text(query), con=engine())
+    if query_type=="num_books": results = results.sort_values(by=["texts"],ascending=False)
+    results = results.replace(np.nan, None).to_dict('records')
+    #print(results)
     return results
 
 
@@ -200,68 +152,7 @@ def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     params = info.query_params
     query = query.replace("'","''")
-    allQuery = '''SET statement_timeout = 60000;
-    select 
-        value
-        ,type
-        ,a.author_id::varchar(255) as author_id
-        ,label
-    from (
-    select 
-        text_id as value
-        ,'text' as type
-        ,text_title || 
-        case
-            when text_original_publication_year is null then ' - ' 
-            when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
-            else ' (' || text_original_publication_year || ' AD' || ') - '
-        end
-        || coalesce(text_author,'Unknown')
-        as label
-        ,text_author_q
-        from texts t
-    WHERE to_tsvector('english', immutable_concat_ws('',ARRAY[text_title,text_author])) @@ plainto_tsquery('english', %(query)s) 
-    ) t
-    left join (select distinct author_q, author_id from authors) a on a.author_q = t.text_author_q
-    UNION ALL
-    select 
-    author_id as value
-    ,'author' as type
-    ,null as author_id
-    ,CONCAT(
-    SPLIT_PART(author_name, ', ', 1),
-    COALESCE(
-        CASE
-        WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
-        WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
-        WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
-                CASE 
-                    WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                    ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-                END
-            ,
-            ')')
-        WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
-            CASE
-                WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
-                ELSE concat(author_birth_year::VARCHAR, ' AD')
-            END
-            ,
-            ')')
-        ELSE CONCAT(' (', ABS(author_birth_year), '-',
-            CASE 
-                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-            END
-            ,
-            ')')
-        END,
-        ''
-    )
-    ) AS label
-    FROM authors
-    WHERE to_tsvector('english', immutable_concat_ws(' ', ARRAY[coalesce(author_name,''), coalesce(author_nationality,''), coalesce(author_positions,''), coalesce(author_birth_city,''), coalesce(author_birth_country,''), coalesce(author_name_language,'')])) @@ plainto_tsquery('english', %(query)s) 
-    '''
+    allQuery = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/search_all.sql")
     search_params = {"query": f"%{query}%"}
     if searchtype == None:
         queryList = query.split(' ')
@@ -269,7 +160,6 @@ def search(info: Request,response: Response, query, searchtype = None):
             results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates().to_dict("records")
             return results
         else:
-            print(queryList)
             results = False#texts = False; authors = False
             for subQuery in queryList:
                 search_params["query"]=f"%{subQuery}%"

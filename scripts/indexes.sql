@@ -1,4 +1,4 @@
-CREATE INDEX idx_texts_full_text_search ON texts USING gin(to_tsvector('english', immutable_concat_ws('',ARRAY[text_title,text_author])));
+CREATE INDEX idx_texts_full_text_search ON texts USING gin(to_tsvector('english', immutable_concat_ws(' ',ARRAY[text_title,text_author])));
 
 CREATE FUNCTION immutable_concat_ws(delimiter text, texts text[])
   RETURNS text

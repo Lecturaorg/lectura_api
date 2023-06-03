@@ -63,3 +63,6 @@ def importData(data):
     else: combined = importData
     with open(fileName, "w") as outfile: json.dump(combined, outfile)
     return data
+
+def read_sql(script):
+    with open(script,"r") as file_content: return file_content.read()
