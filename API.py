@@ -12,6 +12,7 @@ import struct
 from sqlalchemy import text
 from urllib.parse import parse_qs
 from sqlalchemy import text
+import bcrypt
 
 app = FastAPI()
 
@@ -204,28 +205,69 @@ def search(info: Request,response: Response, query, searchtype = None):
             results = results.to_dict('records')
         return results
 
-@app.post("/login")
-async def login(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    print(reqInfo["password"])
-    return reqInfo
-
 @app.post("/create_user")
 async def createUser(response:Response,info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
+    response.headers['Content-Type'] = 'application/json'
     reqInfo = await info.json()
-    hashedPassword = reqInfo["password"]["words"]
-    passwordBytes = b''.join(struct.pack('!i',i) for i in hashedPassword)
-    email = reqInfo["email"]
+    email = reqInfo["user_email"].lower()
+    username = reqInfo["user_name"].lower()
     conn = engine().connect()
-    query = f"SELECT * FROM users WHERE email = '{email}'"
+    query = f"SELECT * FROM users WHERE user_email = '{email}' or user_name = '{username}'"
     df = pd.read_sql_query(query, conn)
-    print(df)
-    if not df.empty: return "duplicate"
+    if not df.empty: 
+        response.body = json.dumps({"message": "Duplicate"}).encode("utf-8")
+        response.status_code = 200
     else:
-        conn.execute("INSERT INTO users (hashed_password, email) VALUES (%s, %s)", (passwordBytes, email))
+        hashedPassword = reqInfo["user_password"]
+        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password) VALUES (%s, %s, %s)", (username, email, hashedPassword))
+        response.body = json.dumps({"user_id": pd.read_sql(query, conn).to_dict("records")[0]["user_id"]}).encode("utf-8")#.user_id)#return pd.read_sql(query,conn).to_dict("records")[0].user_id
+        response.status_code = 200
         conn.close()
+    return response
+
+@app.get("/login_user")
+def login(response:Response, user):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    if "@" in user: login_col = "user_email"
+    else: login_col = "user_name"
+    conn = engine().connect()
+    query = "SELECT user_id, user_name, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
+    df = pd.read_sql_query(query, conn)
+    if df.empty: return False
+    else:
+        df = df.to_dict('records')[0]
+        return {"pw":df["hashed_password"].tobytes().decode('utf-8'),"user_id":df["user_id"], "user_name":df["user_name"]}
+    #return user
+
+@app.post("/create_list")
+async def createList(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    user_id = reqInfo["user_id"]
+    list_name = reqInfo["list_name"]
+    list_descr = reqInfo["list_description"]
+    list_type = reqInfo["list_type"]
+    conn = engine().connect()
+    checkIfExists = "SELECT list_id from USER_LISTS where list_name = '%s'" % (list_name)
+    if pd.read_sql(checkIfExists, conn).empty:
+        conn.execute("INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES (%s, %s, %s, %s)",(user_id, list_name, list_descr, list_type))
+        list_id = pd.read_sql("SELECT list_id FROM USER_LISTS where list_name = '%s'" % (list_name), conn).to_dict("records")[0]["list_id"]
+        print(list_id)
+        response.body = json.dumps({"list_id":list_id}).encode("utf-8")
+        response.status_code = 200
+        conn.close()
+        print(response)
+        return response
+
+@app.get("/get_user_list")
+def get_user_list(response:Response, user_id):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    query = "SELECT * FROM USER_LISTS WHERE USER_ID = '[user_id]'".replace("[user_id]",user_id)
+    lists = pd.read_sql(query, con=engine())
+    if lists.empty: return False
+    else: return lists.to_dict('records')
+
 
 @app.get("/extract_comments")
 def comments(response:Response):
