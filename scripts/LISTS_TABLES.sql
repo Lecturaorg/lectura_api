@@ -8,7 +8,6 @@ CREATE TABLE USER_LISTS (
 	list_modified date DEFAULT now(),
 	user_id INTEGER NOT NULL
 );
-
 /*CREATE TABLE USER_LISTS_DETAIL (
 	list_id INTEGER NOT NULL,
 	SELECT * from user_lists

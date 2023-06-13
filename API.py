@@ -244,6 +244,7 @@ def login(response:Response, user):
 async def createList(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
+    print(reqInfo)
     user_id = reqInfo["user_id"]
     list_name = reqInfo["list_name"]
     list_descr = reqInfo["list_description"]
@@ -261,13 +262,19 @@ async def createList(response:Response, info:Request):
         return response
 
 @app.get("/get_user_list")
-def get_user_list(response:Response, user_id):
+def get_user_list(response:Response, list_id):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = "SELECT * FROM USER_LISTS WHERE USER_ID = '[user_id]'".replace("[user_id]",user_id)
+    query = "SELECT * FROM USER_LISTS WHERE LIST_ID = '%s'" % list_id
     lists = pd.read_sql(query, con=engine())
     if lists.empty: return False
-    else: return lists.to_dict('records')
+    else: return lists.to_dict('records')[0]
 
+@app.get("/get_all_lists")
+def get_all_lists(response:Response):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_of_lists.sql")
+    lists = pd.read_sql(query,con=engine())
+    return lists.to_dict('records')
 
 @app.get("/extract_comments")
 def comments(response:Response):
