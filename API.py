@@ -152,7 +152,7 @@ def data(response: Response, type = None):
 def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     params = info.query_params
-    query = query.replace("'","''")
+    query = query.replace("'","''").strip()
     allQuery = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/search_all.sql")
     search_params = {"query": f"%{query}%"}
     if searchtype == None:
@@ -264,10 +264,16 @@ async def createList(response:Response, info:Request):
 @app.get("/get_user_list")
 def get_user_list(response:Response, list_id):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = "SELECT * FROM USER_LISTS WHERE LIST_ID = '%s'" % list_id
+    query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
     lists = pd.read_sql(query, con=engine())
     if lists.empty: return False
-    else: return lists.to_dict('records')[0]
+    else: 
+        list_info = lists.to_dict('records')[0]
+        if lists_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
+        elif lists_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+        list_elements = pd.read_sql(detail_query.replace("[@list_id]",list_id), con=engine()).to_dict('records')
+        data = {"list_info": list_info, "list_detail": list_elements}
+        return data
 
 @app.get("/get_all_lists")
 def get_all_lists(response:Response):
