@@ -19,8 +19,8 @@ CREATE TABLE USER_LISTS_ELEMENTS (
     element_id SERIAL PRIMARY KEY,
     list_id INTEGER NOT NULL,
     FOREIGN KEY (list_id) REFERENCES USER_LISTS(list_id),
-    element_type VARCHAR(100) NOT NULL,
-    value INTEGER NOT NULL
+    value INTEGER NOT NULL,
+	element_added date DEFAULT now()
 );
 
 --CREATE TABLE USER_LISTS

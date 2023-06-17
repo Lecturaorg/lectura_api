@@ -254,11 +254,9 @@ async def createList(response:Response, info:Request):
     if pd.read_sql(checkIfExists, conn).empty:
         conn.execute("INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES (%s, %s, %s, %s)",(user_id, list_name, list_descr, list_type))
         list_id = pd.read_sql("SELECT list_id FROM USER_LISTS where list_name = '%s'" % (list_name), conn).to_dict("records")[0]["list_id"]
-        print(list_id)
         response.body = json.dumps({"list_id":list_id}).encode("utf-8")
         response.status_code = 200
         conn.close()
-        print(response)
         return response
 
 @app.get("/get_user_list")
@@ -269,11 +267,33 @@ def get_user_list(response:Response, list_id):
     if lists.empty: return False
     else: 
         list_info = lists.to_dict('records')[0]
-        if lists_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
-        elif lists_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+        if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
+        elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
         list_elements = pd.read_sql(detail_query.replace("[@list_id]",list_id), con=engine()).to_dict('records')
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
+
+@app.post("/update_user_list")
+async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    list_info = reqInfo["list_info"]
+    list_id = list_info["list_id"]
+    additions = reqInfo["additions"]
+    removals = reqInfo["removals"]
+    conn = engine().connect()
+    if len(additions)>0:
+        for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
+    if len(removals)>0: 
+        for element in removals: conn.execute("DELETE FROM USER_LISTS_ELEMENTS WHERE list_id = '%s' and value = '%s'" % (list_id, element["value"]))
+    if not list_info is False and len(list_info.keys())>1:
+        for element in list_info.keys():
+            conn.execute("UPDATE USER_LISTS SET %s = '%s' WHERE LIST_ID = %s" % (element,list_info[element], list_id))
+        conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE WHERE LIST_ID = %s" %(list_id))
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
 
 @app.get("/get_all_lists")
 def get_all_lists(response:Response):
