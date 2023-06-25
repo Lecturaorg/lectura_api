@@ -17,7 +17,7 @@ import bcrypt
 app = FastAPI()
 
 @app.get("/data")
-def data(response: Response, type = None, id = None, by = None):
+def data(response: Response, type = None, id:int = None, by = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
@@ -101,7 +101,7 @@ async def add_new(info:Request, response:Response, type):
         conn.close()
 
 @app.post("/edit")
-async def edit_data(info: Request, response: Response, type, id):
+async def edit_data(info: Request, response: Response, type, id:int):
     response.headers["Access-Control-Allow-Origin"] = "*"
     req_info = await info.json()
     if type == "authors": idType = "author_id"
@@ -260,7 +260,7 @@ async def createList(response:Response, info:Request):
         return response
 
 @app.get("/get_user_list")
-def get_user_list(response:Response, list_id):
+def get_user_list(response:Response, list_id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
     query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
     lists = pd.read_sql(query, con=engine())
@@ -269,7 +269,8 @@ def get_user_list(response:Response, list_id):
         list_info = lists.to_dict('records')[0]
         if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
         elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
-        list_elements = pd.read_sql(detail_query.replace("[@list_id]",list_id), con=engine()).to_dict('records')
+        list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine()).fillna('').to_dict('records')
+        print(list_elements)
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
 
@@ -281,11 +282,15 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     list_id = list_info["list_id"]
     additions = reqInfo["additions"]
     removals = reqInfo["removals"]
+    order_changes = reqInfo["order_changes"]
     conn = engine().connect()
     if len(additions)>0:
         for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
     if len(removals)>0: 
         for element in removals: conn.execute("DELETE FROM USER_LISTS_ELEMENTS WHERE list_id = '%s' and value = '%s'" % (list_id, element["value"]))
+    if len(order_changes)>0:
+        for n in range(len(order_changes)): 
+            conn.execute("UPDATE USER_LISTS_ELEMENTS SET ORDER_RANK = %s WHERE ELEMENT_ID = %s",(n, order_changes[n]["element_id"]))
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
             conn.execute("UPDATE USER_LISTS SET %s = '%s' WHERE LIST_ID = %s" % (element,list_info[element], list_id))

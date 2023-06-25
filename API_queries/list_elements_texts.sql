@@ -11,6 +11,9 @@ SELECT
         end
         || coalesce(text_author,'Unknown')
         as label
+    ,text_title
+    ,text_author
+    ,text_original_publication_year
 FROM USER_LISTS_ELEMENTS L
 join texts t on t.text_id = l.value
 --join authors a on a.author_id::varchar(255) = t.author_id

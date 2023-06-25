@@ -8,11 +8,6 @@ CREATE TABLE USER_LISTS (
 	list_modified date DEFAULT now(),
 	user_id INTEGER NOT NULL
 );
-/*CREATE TABLE USER_LISTS_DETAIL (
-	list_id INTEGER NOT NULL,
-	SELECT * from user_lists
-	select * from users
-)*/
 
 DROP TABLE IF EXISTS USER_LISTS_ELEMENTS;
 CREATE TABLE USER_LISTS_ELEMENTS (
@@ -20,8 +15,7 @@ CREATE TABLE USER_LISTS_ELEMENTS (
     list_id INTEGER NOT NULL,
     FOREIGN KEY (list_id) REFERENCES USER_LISTS(list_id),
     value INTEGER NOT NULL,
-	element_added date DEFAULT now()
+	element_added date DEFAULT now(),
+	order_rank INTEGER NOT NULL
 );
-
 --CREATE TABLE USER_LISTS
-
