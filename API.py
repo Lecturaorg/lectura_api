@@ -21,7 +21,7 @@ def data(response: Response, type = None, id:int = None, by = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
-            query = '''select * from authors where author_id = ''' + "'" +id + "'"
+            query = '''select * from authors where author_id = ''' + "'" +str(id) + "'"
             author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
             return author
         if type == 'texts':
@@ -37,16 +37,12 @@ def data(response: Response, type = None, id:int = None, by = None):
                                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') '
                                     else ' (' || text_original_publication_year || ' AD' || ') '
                                 end as "bookLabel"
-                            from texts where author_id = ''' + "'" +id + "'"
+                            from texts where author_id = ''' + "'" +str(id) + "'"
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
             else:
-                query = '''select * from texts where text_id = ''' + "'" +id + "'"#getTexts(''' + id + ')' ##All texts of author_id = id
+                query = '''select * from texts where text_id = ''' + "'" +str(id) + "'"#getTexts(''' + id + ')' ##All texts of author_id = id
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')[0]#.to_json(orient="table")
             return texts
-        if type == 'editions':
-            query = '''select * from getEditions(''' + id + ')' #All editions of text_id = id
-            editions = pd.read_sql(query, con = engine()).replace(np.nan,None).to_dict('records')
-            return editions
     else: results = mainData()
     return results
 
@@ -232,13 +228,24 @@ def login(response:Response, user):
     if "@" in user: login_col = "user_email"
     else: login_col = "user_name"
     conn = engine().connect()
-    query = "SELECT user_id, user_name, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
+    query = "SELECT user_id, user_name, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
     df = pd.read_sql_query(query, conn)
     if df.empty: return False
     else:
         df = df.to_dict('records')[0]
-        return {"pw":df["hashed_password"].tobytes().decode('utf-8'),"user_id":df["user_id"], "user_name":df["user_name"]}
+        return {"pw":df["hashed_password"].tobytes().decode('utf-8')
+                ,"user_id":df["user_id"], "user_name":df["user_name"],"user_email":df["user_email"]}
     #return user
+
+@app.post("/delete_user")
+async def delete_user(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    response.headers['Content-Type'] = 'application/json'
+    reqInfo = await info.json()
+    query = "UPDATE USERS SET HASHED_PASSWORD = NULL, USER_EMAIL = NULL, USER_NAME = '(deleted)_%s' WHERE USER_ID = %s" % (reqInfo["user_name"], reqInfo["user_id"])
+    conn = engine().connect()
+    conn.execute(query)
+    conn.close()
 
 @app.post("/create_list")
 async def createList(response:Response, info:Request):
@@ -294,7 +301,7 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
             conn.execute("UPDATE USER_LISTS SET %s = '%s' WHERE LIST_ID = %s" % (element,list_info[element], list_id))
-        conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE WHERE LIST_ID = %s" %(list_id))
+    conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE WHERE LIST_ID = %s" %(list_id))
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
