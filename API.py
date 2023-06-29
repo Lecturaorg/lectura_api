@@ -307,6 +307,40 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
 
+@app.post("/user_list_interaction")
+async def user_list_interaction(response:Response, info:Request):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    reqInfo = await info.json()
+    interaction_type = reqInfo["type"]
+    list_id = reqInfo["list_id"]
+    user_id = reqInfo["user_id"]
+    delete = reqInfo["delete"]
+    print(reqInfo)
+    if not delete: query = "INSERT INTO USER_LISTS_%sS (list_id, user_id) VALUES (%s, %s)" % (interaction_type, list_id, user_id)
+    else: query = "DELETE FROM USER_LISTS_%ss WHERE list_id = '%s' AND user_id = '%s'" % (interaction_type, list_id, user_id)
+    conn = engine().connect()
+    conn.execute(query)
+    conn.close()
+    response.status_code = 200
+    response.body = {"Response":"USER_LIST HAS BEEN UPDATED"}
+    return response
+
+@app.get("/get_list_interactions")
+def get_all_list_interactions(response:Response, user_id:int):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    query = '''SELECT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as LIST_ID
+                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS WATCHLIST
+                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS LIKE
+                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS DISLIKE
+                from USER_LISTS_WATCHLISTS W 
+                FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
+                FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
+            WHERE W.USER_ID = '%s' OR L.USER_ID = '%s' OR DL.USER_ID = '%s'
+    ''' % (user_id, user_id, user_id)
+    lists = pd.read_sql(query, con=engine())
+    if lists.empty: return False
+    else: return lists.to_dict('records')
+
 @app.get("/get_all_lists")
 def get_all_lists(response:Response):
     response.headers['Access-Control-Allow-Origin'] = "*"
