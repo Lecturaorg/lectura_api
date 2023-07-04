@@ -269,7 +269,8 @@ async def createList(response:Response, info:Request):
 @app.get("/get_user_list")
 def get_user_list(response:Response, list_id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
+    if list_id>0: query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
+    else: query = "SELECT L.* FROM OFFICIAL_LISTS L WHERE LIST_ID = '%s'" % abs(list_id)
     lists = pd.read_sql(query, con=engine())
     if lists.empty: return False
     else: 
@@ -322,16 +323,15 @@ async def user_list_interaction(response:Response, info:Request):
     conn.execute(query)
     conn.close()
     response.status_code = 200
-    response.body = {"Response":"USER_LIST HAS BEEN UPDATED"}
     return response
 
 @app.get("/get_list_interactions")
 def get_all_list_interactions(response:Response, user_id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = '''SELECT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as LIST_ID
-                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS WATCHLIST
-                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS LIKE
-                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS DISLIKE
+    query = '''SELECT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
+                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
+                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
+                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
                 from USER_LISTS_WATCHLISTS W 
                 FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
                 FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
@@ -342,11 +342,25 @@ def get_all_list_interactions(response:Response, user_id:int):
     else: return lists.to_dict('records')
 
 @app.get("/get_all_lists")
-def get_all_lists(response:Response):
+def get_all_lists(response:Response,user_id:int = None):
     response.headers['Access-Control-Allow-Origin'] = "*"
     query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_of_lists.sql")
     lists = pd.read_sql(query,con=engine())
-    return lists.to_dict('records')
+    if user_id:
+            interaction_query = '''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
+                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
+                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
+                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
+                from USER_LISTS_WATCHLISTS W 
+                FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
+                FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
+            WHERE W.USER_ID = '%s' OR L.USER_ID = '%s' OR DL.USER_ID = '%s'
+            ''' % (user_id, user_id, user_id)
+            list_interactions = pd.read_sql(interaction_query, con=engine())
+            if list_interactions.empty: lists = lists
+            else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
+    lists = lists.replace(np.nan,None).to_dict('records')
+    return lists
 
 @app.get("/extract_comments")
 def comments(response:Response):
