@@ -7,7 +7,6 @@ import pandas as pd
 import numpy as np
 from main_data import mainData
 from importAPI import approveImport, importData, read_sql
-from comments import import_comments
 import struct
 from sqlalchemy import text
 from urllib.parse import parse_qs
@@ -60,7 +59,6 @@ def extract_list(response:Response, language=None, country=None, query_type=None
     results = pd.read_sql(text(query), con=engine())
     if query_type=="num_books": results = results.sort_values(by=["texts"],ascending=False)
     results = results.replace(np.nan, None).to_dict('records')
-    #print(results)
     return results
 
 
@@ -316,7 +314,6 @@ async def user_list_interaction(response:Response, info:Request):
     list_id = reqInfo["list_id"]
     user_id = reqInfo["user_id"]
     delete = reqInfo["delete"]
-    print(reqInfo)
     if not delete: query = "INSERT INTO USER_LISTS_%sS (list_id, user_id) VALUES (%s, %s)" % (interaction_type, list_id, user_id)
     else: query = "DELETE FROM USER_LISTS_%ss WHERE list_id = '%s' AND user_id = '%s'" % (interaction_type, list_id, user_id)
     conn = engine().connect()
@@ -362,8 +359,29 @@ def get_all_lists(response:Response,user_id:int = None):
     lists = lists.replace(np.nan,None).to_dict('records')
     return lists
 
+@app.post("/upload_comment")
+async def upload_comment(response:Response, info:Request):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    reqInfo = await info.json()
+    user_id = reqInfo["user_id"]
+    comment = reqInfo["comment"]
+    parent_comment_id = reqInfo["parent_comment_id"]
+    if parent_comment_id is None: parent_comment_id = "null"
+    comment_type = reqInfo["type"]
+    comment_type_id = reqInfo["type_id"]
+    query = '''INSERT INTO COMMENTS (user_id, comment_content, parent_comment_id, comment_type, comment_type_id) VALUES 
+        (%s, '%s', %s, '%s', %s) ''' % (user_id, comment, parent_comment_id, comment_type, comment_type_id)
+    conn = engine().connect()
+    conn.execute(query)
+    conn.close()
+    response.status_code = 200
+    response.body = reqInfo
+    return response
+
 @app.get("/extract_comments")
-def comments(response:Response):
+def comments(response:Response, comment_type, comment_type_id):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    comments = import_comments()
+    query = '''SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 
+                WHERE COMMENT_TYPE = '%s' AND COMMENT_TYPE_ID = %s''' % (comment_type, comment_type_id)
+    comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     return comments
