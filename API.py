@@ -375,7 +375,7 @@ async def upload_comment(response:Response, info:Request):
     conn.execute(query)
     conn.close()
     response.status_code = 200
-    response.body = reqInfo
+    response.body = json.dumps(reqInfo).encode('utf-8')
     return response
 
 @app.get("/extract_comments")
@@ -384,4 +384,12 @@ def comments(response:Response, comment_type, comment_type_id):
     query = '''SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 
                 WHERE COMMENT_TYPE = '%s' AND COMMENT_TYPE_ID = %s''' % (comment_type, comment_type_id)
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
-    return comments
+    def create_comment_tree(comments, parent_id=None):
+        tree = []
+        for comment in comments:
+            if comment['parent_comment_id'] == parent_id:
+                comment['replies'] = create_comment_tree(comments, comment['comment_id'])
+                tree.append(comment)
+        return tree
+    comment_tree = create_comment_tree(comments)
+    return comment_tree
