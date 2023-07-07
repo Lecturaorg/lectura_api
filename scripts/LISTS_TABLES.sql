@@ -6,7 +6,8 @@ CREATE TABLE USER_LISTS (
 	list_type varchar(100),
 	list_created date DEFAULT now(),
 	list_modified date DEFAULT now(),
-	user_id INTEGER NOT NULL
+	user_id INTEGER NOT NULL,
+	list_deleted BOOLEAN DEFAULT NULL
 );
 
 CREATE TABLE OFFICIAL_LISTS (

@@ -8,6 +8,7 @@ select
     ,null as user_id
     ,null as user_name
     ,list_url
+    ,null as list_deleted
     ,'official' as tab
 from official_lists l
 
@@ -23,6 +24,7 @@ select
     ,l.user_id
     ,u.user_name
     ,null as list_url
+    ,list_deleted
     ,'personal' as tab
 from user_lists l
 join users u on u.user_id = l.user_id

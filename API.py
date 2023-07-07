@@ -289,6 +289,7 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     additions = reqInfo["additions"]
     removals = reqInfo["removals"]
     order_changes = reqInfo["order_changes"]
+    delete = reqInfo["delete"]
     conn = engine().connect()
     if len(additions)>0:
         for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
@@ -300,7 +301,8 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
             conn.execute("UPDATE USER_LISTS SET %s = '%s' WHERE LIST_ID = %s" % (element,list_info[element], list_id))
-    conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE WHERE LIST_ID = %s" %(list_id))
+    if delete: conn.execute("UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = %s" % (list_id))
+    conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE CURRENT_TIMESTAMP WHERE LIST_ID = %s" %(list_id))
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
