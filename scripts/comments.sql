@@ -8,7 +8,8 @@ CREATE TABLE comments (
 	comment_created_at TIMESTAMPTZ DEFAULT NOW(),
 	comment_edited_at TIMESTAMPTZ,
 	comment_likes INTEGER DEFAULT 0,
-	comment_dislikes INTEGER DEFAULT 0
+	comment_dislikes INTEGER DEFAULT 0,
+	comment_deleted DEFAULT NULL
 );
 
 CREATE TABLE comment_ratings (
@@ -18,3 +19,5 @@ CREATE TABLE comment_ratings (
 	comment_rating_type VARCHAR(100), -- 'like' or 'dislike'
 	comment_rating_created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 

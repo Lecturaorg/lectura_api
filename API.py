@@ -378,6 +378,22 @@ async def upload_comment(response:Response, info:Request):
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
 
+@app.post("/update_comment")
+async def update_comment(response:Response, info:Request):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    reqInfo = await info.json()
+    comment_id = reqInfo["comment_id"]
+    comment = reqInfo["comment"]
+    delete = reqInfo["delete"]
+    conn = engine().connect()
+    if delete:
+        conn.execute("UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = %s" % (comment_id)) 
+    else: conn.execute("UPDATE COMMENTS SET COMMENT_CONTENT = '%s', COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = %s" % (comment, comment_id))
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
+
 @app.get("/extract_comments")
 def comments(response:Response, comment_type, comment_type_id):
     response.headers['Access-Control-Allow-Origin'] = "*"
