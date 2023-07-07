@@ -1,32 +1,26 @@
 from fastapi import FastAPI, Response, Request
 import json
-from datetime import datetime
-from validation import checkDuplicates, searchDict, mainKeys
-from table_models import engine
+from sql_funcs import engine, read_sql
 import pandas as pd
 import numpy as np
 from main_data import mainData
-from importAPI import approveImport, importData, read_sql
-import struct
 from sqlalchemy import text
 from urllib.parse import parse_qs
-from sqlalchemy import text
 import bcrypt
 
 app = FastAPI()
-
 @app.get("/data")
 def data(response: Response, type = None, id:int = None, by = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
-            query = '''select * from authors where author_id = ''' + "'" +str(id) + "'"
+            query = f"select * from authors where author_id = '{str(id)}'"
             author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
             return author
         if type == 'texts':
             if by == "author":
-                query = '''SET statement_timeout = 60000;select 
-                                text_id
+                query = f'''SET statement_timeout = 60000; 
+                            select text_id
                                 ,text_title as "titleLabel"
                                 ,text_author
                                 ,text_q
@@ -36,10 +30,10 @@ def data(response: Response, type = None, id:int = None, by = None):
                                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') '
                                     else ' (' || text_original_publication_year || ' AD' || ') '
                                 end as "bookLabel"
-                            from texts where author_id = ''' + "'" +str(id) + "'"
+                            from texts where author_id = '{str(id)}' '''
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
             else:
-                query = '''select * from texts where text_id = ''' + "'" +str(id) + "'"#getTexts(''' + id + ')' ##All texts of author_id = id
+                query = f"select * from texts where text_id = '{str(id)}' "
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')[0]#.to_json(orient="table")
             return texts
     else: results = mainData()
@@ -60,87 +54,6 @@ def extract_list(response:Response, language=None, country=None, query_type=None
     if query_type=="num_books": results = results.sort_values(by=["texts"],ascending=False)
     results = results.replace(np.nan, None).to_dict('records')
     return results
-
-
-@app.post("/new")
-async def add_new(info:Request, response:Response, type):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    req_info = await info.json()
-    req_info = checkDuplicates([req_info], mainData()[type])
-    if len(req_info) == 0: return ("This already exists on the database")
-    else: 
-        req_info = req_info[0]
-        cols = req_info.keys()
-        reqs = ["author_name", "text_title", "edition_title"]
-        found = 0
-        for req in reqs: 
-            if req in cols: found+=1
-        if found == 0: return "error"
-        vals = []
-        newCols = []
-        for col in cols:
-            val = req_info[col]
-            if val == "": continue
-            else: newCols.append(col)
-            if isinstance(val, str):
-                if val == "": val = None 
-                if "'" in val:
-                    val = val.replace("'", "''")
-                vals.append("'" + val + "'")
-            else: vals.append(str(val))
-        query = 'insert into ' + type + ' (' + ", ".join(newCols) + ') VALUES (' + ", ".join(vals) + ")"
-        print(query)
-        conn = engine().connect()
-        conn.execute(query)
-        conn.close()
-
-@app.post("/edit")
-async def edit_data(info: Request, response: Response, type, id:int):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    req_info = await info.json()
-    if type == "authors": idType = "author_id"
-    elif type == "texts": idType = "text_id"
-    else: idType = "edition_id"
-    print(req_info)
-    conn = engine().connect()
-    for j in req_info.keys():
-        if j == idType: continue
-        if isinstance(req_info[j],int): setData = str(req_info[j])
-        else: setData = "'" + (req_info[j]) + "'"
-        updateString = 'UPDATE ' + type + " SET " + j + " = " + setData + " WHERE " + idType + " = " + str(id)
-        #insertDataString = '''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j])
-        conn.execute('''INSERT INTO edits (id, type, variable, value) VALUES (%s, %s, %s, %s)''',(id, idType, j, req_info[j]))
-        conn.execute(updateString)
-    conn.close()
-    return {
-        "status" : "SUCCESS",
-        "data" : req_info
-    }
-
-
-@app.post("/import")
-async def import_data(info: Request, response: Response):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    reqInfo = await info.json()
-    data = importData(reqInfo)
-    return {
-        "status" : "SUCCESS",
-        "data" : data
-    }
-
-@app.post("/import/approve")
-async def importApproval(type, response: Response, info: Request):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    approvedData = await info.json()
-    approveImport(approvedData, type)
-    return "Imports have been approved"
-
-@app.get("/import_data")
-def data(response: Response, type = None):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    file_name = type+"_import.json"
-    with open(file_name) as json_file: data = json.load(json_file)
-    return data
 
 @app.get("/search")
 def search(info: Request,response: Response, query, searchtype = None):
@@ -168,13 +81,8 @@ def search(info: Request,response: Response, query, searchtype = None):
         parsed = parse_qs(str(params))
         filters = json.loads(parsed.get('filters', [''])[0])
         def find_results(query):
-            queryBase = '''
-            SET statement_timeout = 60000;
-            select 
-                *
-            from authors
-            WHERE  
-            '''
+            queryBase = '''SET statement_timeout = 60000;
+                select  * from authors WHERE  '''
             variables = searchtype.replace("s","")+"_id"
             filterString = ""
             whereClause = "WHERE "
@@ -184,7 +92,6 @@ def search(info: Request,response: Response, query, searchtype = None):
                 if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
                 else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
             query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString).replace("authors",str(searchtype))
-            print(query)
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
         queryList = query.split(" ")
@@ -232,24 +139,21 @@ def login(response:Response, user):
     else:
         df = df.to_dict('records')[0]
         return {"pw":df["hashed_password"].tobytes().decode('utf-8')
-                ,"user_id":df["user_id"], "user_name":df["user_name"],"user_email":df["user_email"]}
-    #return user
+                    ,"user_id":df["user_id"], "user_name":df["user_name"],"user_email":df["user_email"]}
 
 @app.post("/delete_user")
 async def delete_user(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     response.headers['Content-Type'] = 'application/json'
     reqInfo = await info.json()
-    query = "UPDATE USERS SET HASHED_PASSWORD = NULL, USER_EMAIL = NULL, USER_NAME = '(deleted)_%s' WHERE USER_ID = %s" % (reqInfo["user_name"], reqInfo["user_id"])
     conn = engine().connect()
-    conn.execute(query)
+    conn.execute("UPDATE USERS SET HASHED_PASSWORD = NULL, USER_EMAIL = NULL, USER_NAME = '(deleted)_%s' WHERE USER_ID = %s" % (reqInfo["user_name"], reqInfo["user_id"]))
     conn.close()
 
 @app.post("/create_list")
 async def createList(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
-    print(reqInfo)
     user_id = reqInfo["user_id"]
     list_name = reqInfo["list_name"]
     list_descr = reqInfo["list_description"]
@@ -259,9 +163,9 @@ async def createList(response:Response, info:Request):
     if pd.read_sql(checkIfExists, conn).empty:
         conn.execute("INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES (%s, %s, %s, %s)",(user_id, list_name, list_descr, list_type))
         list_id = pd.read_sql("SELECT list_id FROM USER_LISTS where list_name = '%s'" % (list_name), conn).to_dict("records")[0]["list_id"]
+        conn.close()
         response.body = json.dumps({"list_id":list_id}).encode("utf-8")
         response.status_code = 200
-        conn.close()
         return response
 
 @app.get("/get_user_list")
@@ -276,7 +180,6 @@ def get_user_list(response:Response, list_id:int):
         if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
         elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
         list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine()).fillna('').to_dict('records')
-        print(list_elements)
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
 
@@ -300,9 +203,9 @@ async def update_user_list(response:Response, info:Request): #Update every list_
             conn.execute("UPDATE USER_LISTS_ELEMENTS SET ORDER_RANK = %s WHERE ELEMENT_ID = %s",(n, order_changes[n]["element_id"]))
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
-            conn.execute("UPDATE USER_LISTS SET %s = '%s' WHERE LIST_ID = %s" % (element,list_info[element], list_id))
-    if delete: conn.execute("UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = %s" % (list_id))
-    conn.execute("UPDATE USER_LISTS SET LIST_MODIFIED_DATE CURRENT_TIMESTAMP WHERE LIST_ID = %s" %(list_id))
+            conn.execute(f"UPDATE USER_LISTS SET {element} = '{list_info[element]}' WHERE LIST_ID = {list_id}")
+    if delete: conn.execute(f"UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = {list_id}")
+    conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED_DATE CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
@@ -324,37 +227,20 @@ async def user_list_interaction(response:Response, info:Request):
     response.status_code = 200
     return response
 
-@app.get("/get_list_interactions")
-def get_all_list_interactions(response:Response, user_id:int):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    query = '''SELECT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
-                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
-                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
-                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
-                from USER_LISTS_WATCHLISTS W 
-                FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
-                FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-            WHERE W.USER_ID = '%s' OR L.USER_ID = '%s' OR DL.USER_ID = '%s'
-    ''' % (user_id, user_id, user_id)
-    lists = pd.read_sql(query, con=engine())
-    if lists.empty: return False
-    else: return lists.to_dict('records')
-
 @app.get("/get_all_lists")
 def get_all_lists(response:Response,user_id:int = None):
     response.headers['Access-Control-Allow-Origin'] = "*"
     query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_of_lists.sql")
     lists = pd.read_sql(query,con=engine())
     if user_id:
-            interaction_query = '''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
-                , CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
+            interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
+                ,CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
                 ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
                 ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
                 from USER_LISTS_WATCHLISTS W 
                 FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
                 FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-            WHERE W.USER_ID = '%s' OR L.USER_ID = '%s' OR DL.USER_ID = '%s'
-            ''' % (user_id, user_id, user_id)
+            WHERE W.USER_ID = '{user_id}' OR L.USER_ID = '{user_id}' OR DL.USER_ID = '{user_id}' '''
             list_interactions = pd.read_sql(interaction_query, con=engine())
             if list_interactions.empty: lists = lists
             else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
@@ -389,8 +275,8 @@ async def update_comment(response:Response, info:Request):
     delete = reqInfo["delete"]
     conn = engine().connect()
     if delete:
-        conn.execute("UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = %s" % (comment_id)) 
-    else: conn.execute("UPDATE COMMENTS SET COMMENT_CONTENT = '%s', COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = %s" % (comment, comment_id))
+        conn.execute(f"UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = {comment_id}") 
+    else: conn.execute(f"UPDATE COMMENTS SET COMMENT_CONTENT = '{comment}', COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = {comment_id}")
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
@@ -399,8 +285,8 @@ async def update_comment(response:Response, info:Request):
 @app.get("/extract_comments")
 def comments(response:Response, comment_type, comment_type_id):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = '''SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 
-                WHERE COMMENT_TYPE = '%s' AND COMMENT_TYPE_ID = %s''' % (comment_type, comment_type_id)
+    query = f'''SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 
+                WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}'''
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     def create_comment_tree(comments, parent_id=None):
         tree = []

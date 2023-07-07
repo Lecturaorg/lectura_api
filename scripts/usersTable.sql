@@ -7,5 +7,3 @@ CREATE TABLE users (
 	user_created date default NOW(),
     hashed_password BYTEA NOT NULL
 );
-
---select * from users
