@@ -169,11 +169,23 @@ async def createList(response:Response, info:Request):
         return response
 
 @app.get("/get_user_list")
-def get_user_list(response:Response, list_id:int):
+def get_user_list(response:Response, list_id:int, user_id:int=None):
     response.headers['Access-Control-Allow-Origin'] = "*"
     if list_id>0: query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
     else: query = "SELECT L.* FROM OFFICIAL_LISTS L WHERE LIST_ID = '%s'" % abs(list_id)
     lists = pd.read_sql(query, con=engine())
+    if user_id:
+        interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
+            ,CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
+            ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
+            ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
+            from USER_LISTS_WATCHLISTS W 
+            FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
+            FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
+        WHERE W.USER_ID = '{user_id}' OR L.USER_ID = '{user_id}' OR DL.USER_ID = '{user_id}' '''
+        list_interactions = pd.read_sql(interaction_query, con=engine())
+        if list_interactions.empty: lists = lists
+        else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
     if lists.empty: return False
     else: 
         list_info = lists.to_dict('records')[0]
@@ -224,6 +236,7 @@ async def user_list_interaction(response:Response, info:Request):
     conn = engine().connect()
     conn.execute(query)
     conn.close()
+    response.body = json.dumps(reqInfo).encode('utf-8')
     response.status_code = 200
     return response
 
@@ -283,10 +296,31 @@ async def update_comment(response:Response, info:Request):
     return response
 
 @app.get("/extract_comments")
-def comments(response:Response, comment_type, comment_type_id):
+def comments(response:Response, comment_type, comment_type_id, user_id:int=None):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = f'''SELECT C.*, U.USER_NAME FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID 
-                WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}'''
+    if user_id is None: user_id = 0
+    else: user_id = user_id
+    query = f'''SELECT C.comment_id
+		,c.user_id
+		,c.parent_comment_id
+		,c.comment_type
+		,c.comment_type_id
+		,c.comment_content
+		,c.comment_created_at
+		,c.comment_edited_at
+		,coalesce(cr.comment_likes,0) likes
+		,coalesce(cr.comment_dislikes,0) dislikes
+		,U.USER_NAME 
+        ,cr_user.comment_rating_type as user_interaction
+		FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID
+		LEFT JOIN (
+			select comment_id 
+			 	,SUM(CASE WHEN comment_rating_type = 'like' then 1 else 0 end) comment_likes
+			 	,SUM(CASE WHEN comment_rating_type = 'dislike' then 1 else 0 end) comment_dislikes			 
+			 from comment_ratings group by comment_id) cr on cr.comment_id = c.comment_id
+		left join (select comment_id, max(comment_rating_type) comment_rating_type 
+				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
+        WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}'''
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     def create_comment_tree(comments, parent_id=None):
         tree = []
@@ -296,4 +330,23 @@ def comments(response:Response, comment_type, comment_type_id):
                 tree.append(comment)
         return tree
     comment_tree = create_comment_tree(comments)
+    print(comment_tree)
     return comment_tree
+
+@app.post("/comment_interaction")
+async def comment_interaction(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    interaction_type = reqInfo["type"]
+    user_id = reqInfo["user_id"]
+    comment_id = reqInfo["comment_id"]
+    conn = engine().connect()
+    if not interaction_type: conn.execute(f"DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id}")
+    else: conn.execute(f'''
+        DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id};
+        INSERT INTO comment_ratings (user_id, comment_id, comment_rating_type) VALUES ({user_id},{comment_id},'{interaction_type}')
+        ''')
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
