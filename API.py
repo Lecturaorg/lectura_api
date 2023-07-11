@@ -182,7 +182,7 @@ def get_user_list(response:Response, list_id:int, user_id:int=None):
             from USER_LISTS_WATCHLISTS W 
             FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
             FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-        WHERE W.USER_ID = '{user_id}' OR L.USER_ID = '{user_id}' OR DL.USER_ID = '{user_id}' '''
+        WHERE W.USER_ID = '{str(user_id)}' OR L.USER_ID = '{str(user_id)}' OR DL.USER_ID = '{str(user_id)}' '''
         list_interactions = pd.read_sql(interaction_query, con=engine())
         if list_interactions.empty: lists = lists
         else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
@@ -190,7 +190,9 @@ def get_user_list(response:Response, list_id:int, user_id:int=None):
     else: 
         list_info = lists.to_dict('records')[0]
         if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
-        elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+        elif list_info["list_type"] == "texts": 
+            detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+            detail_query = detail_query.replace('[$user_id]',str(user_id))
         list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine()).fillna('').to_dict('records')
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
@@ -346,6 +348,23 @@ async def comment_interaction(response:Response, info:Request):
         DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id};
         INSERT INTO comment_ratings (user_id, comment_id, comment_rating_type) VALUES ({user_id},{comment_id},'{interaction_type}')
         ''')
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
+
+@app.post("/check")
+async def check(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    user_id = reqInfo["user_id"]
+    text_id = reqInfo["text_id"]
+    check = reqInfo["check"]
+    if not check: query = f"DELETE FROM CHECKS WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};"
+    else: query = f'''DELETE FROM CHECKS WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};
+                        INSERT INTO CHECKS (text_id, user_id) VALUES ({text_id},{user_id});'''
+    conn = engine().connect()
+    conn.execute(query)
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
