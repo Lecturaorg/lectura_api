@@ -186,6 +186,8 @@ def get_user_list(response:Response, list_id:int, user_id:int=None):
         list_interactions = pd.read_sql(interaction_query, con=engine())
         if list_interactions.empty: lists = lists
         else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
+    if user_id is None: user_id = 'null'
+    else: user_id = user_id
     if lists.empty: return False
     else: 
         list_info = lists.to_dict('records')[0]
@@ -353,16 +355,17 @@ async def comment_interaction(response:Response, info:Request):
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
 
-@app.post("/check")
-async def check(response:Response, info:Request):
+@app.post("/text_interaction")
+async def text_interaction(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
     user_id = reqInfo["user_id"]
     text_id = reqInfo["text_id"]
-    check = reqInfo["check"]
-    if not check: query = f"DELETE FROM CHECKS WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};"
-    else: query = f'''DELETE FROM CHECKS WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};
-                        INSERT INTO CHECKS (text_id, user_id) VALUES ({text_id},{user_id});'''
+    type = reqInfo["type"]
+    condition = reqInfo["condition"]
+    if not condition: query = f"DELETE FROM {type} WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};"
+    else: query = f'''DELETE FROM {type} WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};
+                        INSERT INTO {type} (text_id, user_id) VALUES ({text_id},{user_id});'''
     conn = engine().connect()
     conn.execute(query)
     conn.close()
