@@ -11,3 +11,4 @@ CREATE TABLE WATCH (
 	user_id INTEGER REFERENCES users (user_id),
 	watch_date TIMESTAMPTZ DEFAULT NOW()
 );
+

@@ -16,3 +16,9 @@ def engine():
 
 def read_sql(script):
     with open(script,"r") as file_content: return file_content.read()
+
+def validateUser(user,hash):
+    query = f"SELECT USER_ID FROM USER_SESSIONS WHERE USER_ID = {user} AND HASH = '{hash}'"
+    validation = pd.read_sql(query, con=engine())
+    if validation is pd.empty: return False
+    else: return True

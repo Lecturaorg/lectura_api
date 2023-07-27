@@ -1,16 +1,17 @@
 from fastapi import FastAPI, Response, Request
 import json
-from sql_funcs import engine, read_sql
+from sql_funcs import engine, read_sql, validateUser
 import pandas as pd
 import numpy as np
+import secrets
+import hashlib
 from main_data import mainData
 from sqlalchemy import text
 from urllib.parse import parse_qs
-import bcrypt
 
 app = FastAPI()
 @app.get("/data")
-def data(response: Response, type = None, id:int = None, by = None):
+def data(response: Response, type = None, id:int = None, by = None, user_id:int = 0):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
@@ -20,7 +21,7 @@ def data(response: Response, type = None, id:int = None, by = None):
         if type == 'texts':
             if by == "author":
                 query = f'''SET statement_timeout = 60000; 
-                            select text_id
+                            select t.text_id
                                 ,text_title as "titleLabel"
                                 ,text_author
                                 ,text_q
@@ -30,10 +31,21 @@ def data(response: Response, type = None, id:int = None, by = None):
                                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') '
                                     else ' (' || text_original_publication_year || ' AD' || ') '
                                 end as "bookLabel"
-                            from texts where author_id = '{str(id)}' '''
+                                ,case when c.text_id is not null then true else false end as checks
+                                ,case when w.text_id is not null then true else false end as watch
+                            from texts t
+                            left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
+                            left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
+                            where author_id = '{str(id)}' '''
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
             else:
-                query = f"select * from texts where text_id = '{str(id)}' "
+                query = f'''select t.*
+                            ,case when c.text_id is not null then true else false end as checks
+                            ,case when w.text_id is not null then true else false end as watch
+                            from texts t
+                            left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
+                            left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
+                            where t.text_id = '{str(id)}' '''
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')[0]#.to_json(orient="table")
             return texts
     else: results = mainData()
@@ -85,7 +97,6 @@ def search(info: Request,response: Response, query, searchtype = None):
                 select  * from authors WHERE  '''
             variables = searchtype.replace("s","")+"_id"
             filterString = ""
-            whereClause = "WHERE "
             for n in range(len(filters)): #varlist should be a body in API request and optional
                 var = filters[n]
                 variables += ","+ var["value"] + '''::varchar(255) "''' + var["label"] + '''" \n''' #Add every search variable
@@ -128,24 +139,34 @@ async def createUser(response:Response,info:Request):
     return response
 
 @app.get("/login_user")
-def login(response:Response, user):
+def login(response:Response,request:Request, user):
     response.headers['Access-Control-Allow-Origin'] = "*"
     if "@" in user: login_col = "user_email"
     else: login_col = "user_name"
-    conn = engine().connect()
     query = "SELECT user_id, user_name, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
+    conn = engine().connect()
     df = pd.read_sql_query(query, conn)
     if df.empty: return False
     else:
+        random_number = str(secrets.randbits(32))
+        user_ip = request.client.host
+        user_agent = request.headers.get('User-Agent')
+        data = user_ip+user_agent+random_number
+        hashed_data = hashlib.sha256(data.encode()).hexdigest()
         df = df.to_dict('records')[0]
+        sessionQuery = f'''DELETE FROM USER_SESSIONS WHERE USER_ID = {df["user_id"]};
+                        INSERT INTO USER_SESSIONS (HASH, USER_ID) VALUES ('{hashed_data}', {df["user_id"]})'''
+        conn.execute(sessionQuery)
         return {"pw":df["hashed_password"].tobytes().decode('utf-8')
-                    ,"user_id":df["user_id"], "user_name":df["user_name"],"user_email":df["user_email"]}
+                    ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"]
+                    ,"hash":hashed_data}
 
 @app.post("/delete_user")
 async def delete_user(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     response.headers['Content-Type'] = 'application/json'
     reqInfo = await info.json()
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): return
     conn = engine().connect()
     conn.execute("UPDATE USERS SET HASHED_PASSWORD = NULL, USER_EMAIL = NULL, USER_NAME = '(deleted)_%s' WHERE USER_ID = %s" % (reqInfo["user_name"], reqInfo["user_id"]))
     conn.close()
@@ -155,6 +176,11 @@ async def createList(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
     user_id = reqInfo["user_id"]
+    hash = reqInfo["hash"]
+    if not validateUser(user_id, hash): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
     list_name = reqInfo["list_name"]
     list_descr = reqInfo["list_description"]
     list_type = reqInfo["list_type"]
@@ -169,12 +195,23 @@ async def createList(response:Response, info:Request):
         return response
 
 @app.get("/get_user_list")
-def get_user_list(response:Response, list_id:int, user_id:int=None):
+def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=None):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    if list_id>0: query = "SELECT L.*,u.user_name FROM USER_LISTS L join USERS u on u.user_id=l.user_id WHERE LIST_ID = '%s'" % list_id
-    else: query = "SELECT L.* FROM OFFICIAL_LISTS L WHERE LIST_ID = '%s'" % abs(list_id)
+    if list_id>0: list_type = "user"
+    else: list_type= "official"
+    if list_id>0: query = f'''SELECT L.*
+                            ,u.user_name 
+                            ,coalesce(lik.likes,0) likes
+                            ,coalesce(dis.dislikes,0) dislikes
+                            ,coalesce(watch.watchlists,0) watchlists
+                        FROM {list_type}_LISTS L 
+                        join USERS u on u.user_id=l.user_id 
+                        left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = L.list_id
+                        left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = L.list_id
+                        left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = L.list_id
+                        WHERE L.LIST_ID = {abs(list_id)}'''
     lists = pd.read_sql(query, con=engine())
-    if user_id:
+    if validateUser(user_id, hash):
         interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
             ,CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
             ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
@@ -203,6 +240,10 @@ def get_user_list(response:Response, list_id:int, user_id:int=None):
 async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
+    if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
     list_info = reqInfo["list_info"]
     list_id = list_info["list_id"]
     additions = reqInfo["additions"]
@@ -231,6 +272,10 @@ async def update_user_list(response:Response, info:Request): #Update every list_
 async def user_list_interaction(response:Response, info:Request):
     response.headers["Access-Control-Allow-Origin"] = "*"
     reqInfo = await info.json()
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
     interaction_type = reqInfo["type"]
     list_id = reqInfo["list_id"]
     user_id = reqInfo["user_id"]
@@ -269,6 +314,10 @@ async def upload_comment(response:Response, info:Request):
     response.headers["Access-Control-Allow-Origin"] = "*"
     reqInfo = await info.json()
     user_id = reqInfo["user_id"]
+    if not validateUser(user_id, reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
     comment = reqInfo["comment"]
     parent_comment_id = reqInfo["parent_comment_id"]
     if parent_comment_id is None: parent_comment_id = "null"
@@ -287,6 +336,10 @@ async def upload_comment(response:Response, info:Request):
 async def update_comment(response:Response, info:Request):
     response.headers["Access-Control-Allow-Origin"] = "*"
     reqInfo = await info.json()
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response    
     comment_id = reqInfo["comment_id"]
     comment = reqInfo["comment"]
     delete = reqInfo["delete"]
@@ -341,6 +394,10 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
 async def comment_interaction(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
     interaction_type = reqInfo["type"]
     user_id = reqInfo["user_id"]
     comment_id = reqInfo["comment_id"]
@@ -360,6 +417,10 @@ async def text_interaction(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
     user_id = reqInfo["user_id"]
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response    
     text_id = reqInfo["text_id"]
     type = reqInfo["type"]
     condition = reqInfo["condition"]
