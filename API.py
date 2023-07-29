@@ -93,16 +93,50 @@ def search(info: Request,response: Response, query, searchtype = None):
         parsed = parse_qs(str(params))
         filters = json.loads(parsed.get('filters', [''])[0])
         def find_results(query):
-            queryBase = '''SET statement_timeout = 60000;
-                select  * from authors WHERE  '''
+            queryBase = f'''SET statement_timeout = 60000;
+                select  * from {searchtype} WHERE  '''
             variables = searchtype.replace("s","")+"_id"
+            if searchtype == "authors": variables+= ''',CONCAT(
+                SPLIT_PART(author_name, ', ', 1),
+                COALESCE(
+                    CASE
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
+                    WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
+                            CASE 
+                                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                            END,
+                        ')')
+                    WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
+                        CASE
+                            WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+                            ELSE concat(author_birth_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    ELSE CONCAT(' (', ABS(author_birth_year), '-',
+                        CASE 
+                            WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                            ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    END,'')) AS label'''
+            elif searchtype == "texts": variables+=''',split_part(author_id,',',1) author_id,text_title || 
+                case
+                    when text_original_publication_year is null then ' - ' 
+                    when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+                    else ' (' || text_original_publication_year || ' AD' || ') - '
+                end
+                || coalesce(text_author,'Unknown')
+                as label'''
             filterString = ""
             for n in range(len(filters)): #varlist should be a body in API request and optional
                 var = filters[n]
-                variables += ","+ var["value"] + '''::varchar(255) "''' + var["label"] + '''" \n''' #Add every search variable
+                if var["value"]=="label": continue
+                variables += ","+ var["value"] + '''::varchar(255) "''' + var["value"] + '''" \n''' #Add every search variable
                 if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
                 else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
-            query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString).replace("authors",str(searchtype))
+            query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString)
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
         queryList = query.split(" ")
@@ -197,19 +231,23 @@ async def createList(response:Response, info:Request):
 @app.get("/get_user_list")
 def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=None):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    if list_id>0: list_type = "user"
-    else: list_type= "official"
-    if list_id>0: query = f'''SELECT L.*
-                            ,u.user_name 
-                            ,coalesce(lik.likes,0) likes
-                            ,coalesce(dis.dislikes,0) dislikes
-                            ,coalesce(watch.watchlists,0) watchlists
-                        FROM {list_type}_LISTS L 
-                        join USERS u on u.user_id=l.user_id 
-                        left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = L.list_id
-                        left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = L.list_id
-                        left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = L.list_id
-                        WHERE L.LIST_ID = {abs(list_id)}'''
+    if list_id>0: 
+        list_type = "user"
+        multiplier = 1
+    else: 
+        list_type= "official"
+        multiplier = -1
+    query = f'''SELECT L.*
+                    ,u.user_name 
+                    ,coalesce(lik.likes,0) likes
+                    ,coalesce(dis.dislikes,0) dislikes
+                    ,coalesce(watch.watchlists,0) watchlists
+                FROM {list_type}_LISTS L 
+                left join USERS u on u.user_id=l.user_id
+                left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = L.list_id*{multiplier}
+                left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = L.list_id*{multiplier}
+                left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = L.list_id*{multiplier}
+                WHERE L.LIST_ID = {abs(list_id)}'''
     lists = pd.read_sql(query, con=engine())
     if validateUser(user_id, hash):
         interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
@@ -222,17 +260,18 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         WHERE W.USER_ID = '{str(user_id)}' OR L.USER_ID = '{str(user_id)}' OR DL.USER_ID = '{str(user_id)}' '''
         list_interactions = pd.read_sql(interaction_query, con=engine())
         if list_interactions.empty: lists = lists
-        else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
+        else: lists = pd.merge(lists, list_interactions, how="left",on="list_id").fillna('')
     if user_id is None: user_id = 'null'
     else: user_id = user_id
     if lists.empty: return False
     else: 
         list_info = lists.to_dict('records')[0]
         if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
-        elif list_info["list_type"] == "texts": 
-            detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
-            detail_query = detail_query.replace('[$user_id]',str(user_id))
-        list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine()).fillna('').to_dict('records')
+        elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+        detail_query = detail_query.replace('[$user_id]',str(user_id))
+        list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine())
+        if not list_elements.empty: list_elements = list_elements.fillna('').to_dict('records')
+        else: list_elements = []
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
 
@@ -240,6 +279,7 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
 async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
+    print(reqInfo)
     if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
         response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
         response.status_code = 400
@@ -262,7 +302,7 @@ async def update_user_list(response:Response, info:Request): #Update every list_
         for element in list_info.keys():
             conn.execute(f"UPDATE USER_LISTS SET {element} = '{list_info[element]}' WHERE LIST_ID = {list_id}")
     if delete: conn.execute(f"UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = {list_id}")
-    conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED_DATE CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
+    conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED = CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
@@ -387,7 +427,6 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
                 tree.append(comment)
         return tree
     comment_tree = create_comment_tree(comments)
-    print(comment_tree)
     return comment_tree
 
 @app.post("/comment_interaction")

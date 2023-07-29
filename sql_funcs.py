@@ -20,5 +20,5 @@ def read_sql(script):
 def validateUser(user,hash):
     query = f"SELECT USER_ID FROM USER_SESSIONS WHERE USER_ID = {user} AND HASH = '{hash}'"
     validation = pd.read_sql(query, con=engine())
-    if validation is pd.empty: return False
+    if validation is validation.empty: return False
     else: return True

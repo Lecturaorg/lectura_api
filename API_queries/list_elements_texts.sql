@@ -1,6 +1,7 @@
 SET statement_timeout = 60000;
 SELECT 
     element_id
+    ,substring(t.author_id FROM '^\d+') author_id
     ,list_id
     ,l.value
     ,text_title || 
