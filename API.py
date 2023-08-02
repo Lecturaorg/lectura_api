@@ -320,7 +320,10 @@ async def user_list_interaction(response:Response, info:Request):
     list_id = reqInfo["list_id"]
     user_id = reqInfo["user_id"]
     delete = reqInfo["delete"]
-    if not delete: query = "INSERT INTO USER_LISTS_%sS (list_id, user_id) VALUES (%s, %s)" % (interaction_type, list_id, user_id)
+    print(reqInfo)
+    if not delete: 
+        query = f'''DELETE FROM USER_LISTS_{interaction_type}S WHERE LIST_ID = {list_id} and USER_ID = {user_id};
+            INSERT INTO USER_LISTS_{interaction_type}S (list_id, user_id) VALUES ({list_id}, {user_id})'''
     else: query = "DELETE FROM USER_LISTS_%ss WHERE list_id = '%s' AND user_id = '%s'" % (interaction_type, list_id, user_id)
     conn = engine().connect()
     conn.execute(query)
