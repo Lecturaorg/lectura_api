@@ -51,7 +51,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     else: results = mainData()
     return results
 
-@app.get("/lists")
+@app.get("/official_lists")
 def extract_list(response:Response, language=None, country=None, query_type=None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     queries = {'num_books':"/Users/tarjeisandsnes/lectura_api/API_queries/texts_by_author.sql",
@@ -59,9 +59,7 @@ def extract_list(response:Response, language=None, country=None, query_type=None
     query = read_sql(queries[query_type])
     if language=="All": language=""
     if country=="All": query = query.replace("a.author_nationality ilike '%[country]%' and ", "")
-    language = language.replace("'","''")
-    country = country.replace("'","''")
-    query = query.replace("[country]", country).replace("[language]",language)
+    query = query.replace("[country]", country.replace("'","''")).replace("[language]",language.replace("'","''"))
     results = pd.read_sql(text(query), con=engine())
     if query_type=="num_books": results = results.sort_values(by=["texts"],ascending=False)
     results = results.replace(np.nan, None).to_dict('records')
@@ -80,7 +78,7 @@ def search(info: Request,response: Response, query, searchtype = None):
             results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates().to_dict("records")
             return results
         else:
-            results = False#texts = False; authors = False
+            results = False
             for subQuery in queryList:
                 search_params["query"]=f"%{subQuery}%"
                 if isinstance(results, pd.DataFrame):
@@ -96,7 +94,7 @@ def search(info: Request,response: Response, query, searchtype = None):
             queryBase = f'''SET statement_timeout = 60000;
                 select  * from {searchtype} WHERE  '''
             variables = searchtype.replace("s","")+"_id"
-            if searchtype == "authors": variables+= ''',CONCAT(
+            if searchtype == "authors": variables+= ''',author_id as value,CONCAT(
                 SPLIT_PART(author_name, ', ', 1),
                 COALESCE(
                     CASE
@@ -121,7 +119,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                         END,
                         ')')
                     END,'')) AS label'''
-            elif searchtype == "texts": variables+=''',split_part(author_id,',',1) author_id,text_title || 
+            elif searchtype == "texts": variables+=''',text_id as value,split_part(author_id,',',1) author_id,text_title || 
                 case
                     when text_original_publication_year is null then ' - ' 
                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
@@ -167,7 +165,7 @@ async def createUser(response:Response,info:Request):
     else:
         hashedPassword = reqInfo["user_password"]
         conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password) VALUES (%s, %s, %s)", (username, email, hashedPassword))
-        response.body = json.dumps({"user_id": pd.read_sql(query, conn).to_dict("records")[0]["user_id"]}).encode("utf-8")#.user_id)#return pd.read_sql(query,conn).to_dict("records")[0].user_id
+        response.body = json.dumps({"user_id": pd.read_sql(query, conn).to_dict("records")[0]["user_id"]}).encode("utf-8")
         response.status_code = 200
         conn.close()
     return response
@@ -191,9 +189,8 @@ def login(response:Response,request:Request, user):
         sessionQuery = f'''DELETE FROM USER_SESSIONS WHERE USER_ID = {df["user_id"]};
                         INSERT INTO USER_SESSIONS (HASH, USER_ID) VALUES ('{hashed_data}', {df["user_id"]})'''
         conn.execute(sessionQuery)
-        return {"pw":df["hashed_password"].tobytes().decode('utf-8')
-                    ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"]
-                    ,"hash":hashed_data}
+        return {"pw":df["hashed_password"].tobytes().decode('utf-8'),"hash":hashed_data
+                ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"]}
 
 @app.post("/delete_user")
 async def delete_user(response:Response, info:Request):
@@ -219,10 +216,10 @@ async def createList(response:Response, info:Request):
     list_descr = reqInfo["list_description"]
     list_type = reqInfo["list_type"]
     conn = engine().connect()
-    checkIfExists = "SELECT list_id from USER_LISTS where list_name = '%s'" % (list_name)
+    checkIfExists = f"SELECT list_id from USER_LISTS where list_name = '{list_name}'"
     if pd.read_sql(checkIfExists, conn).empty:
-        conn.execute("INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES (%s, %s, %s, %s)",(user_id, list_name, list_descr, list_type))
-        list_id = pd.read_sql("SELECT list_id FROM USER_LISTS where list_name = '%s'" % (list_name), conn).to_dict("records")[0]["list_id"]
+        conn.execute(f"INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES ({user_id}, {list_name}, {list_descr}, {list_type})")
+        list_id = pd.read_sql(f"SELECT list_id FROM USER_LISTS where list_name = '{list_name}'", conn).to_dict("records")[0]["list_id"]
         conn.close()
         response.body = json.dumps({"list_id":list_id}).encode("utf-8")
         response.status_code = 200
@@ -257,7 +254,7 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
             from USER_LISTS_WATCHLISTS W 
             FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
             FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-        WHERE W.USER_ID = '{str(user_id)}' OR L.USER_ID = '{str(user_id)}' OR DL.USER_ID = '{str(user_id)}' '''
+            WHERE W.USER_ID = '{str(user_id)}' OR L.USER_ID = '{str(user_id)}' OR DL.USER_ID = '{str(user_id)}' '''
         list_interactions = pd.read_sql(interaction_query, con=engine())
         if list_interactions.empty: lists = lists
         else: lists = pd.merge(lists, list_interactions, how="left",on="list_id").fillna('')
@@ -279,7 +276,6 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
 async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
-    print(reqInfo)
     if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
         response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
         response.status_code = 400
@@ -320,7 +316,6 @@ async def user_list_interaction(response:Response, info:Request):
     list_id = reqInfo["list_id"]
     user_id = reqInfo["user_id"]
     delete = reqInfo["delete"]
-    print(reqInfo)
     if not delete: 
         query = f'''DELETE FROM USER_LISTS_{interaction_type}S WHERE LIST_ID = {list_id} and USER_ID = {user_id};
             INSERT INTO USER_LISTS_{interaction_type}S (list_id, user_id) VALUES ({list_id}, {user_id})'''
@@ -413,12 +408,11 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
 		,U.USER_NAME 
         ,cr_user.comment_rating_type as user_interaction
 		FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID
-		LEFT JOIN (
-			select comment_id 
-			 	,SUM(CASE WHEN comment_rating_type = 'like' then 1 else 0 end) comment_likes
-			 	,SUM(CASE WHEN comment_rating_type = 'dislike' then 1 else 0 end) comment_dislikes			 
-			 from comment_ratings group by comment_id) cr on cr.comment_id = c.comment_id
-		left join (select comment_id, max(comment_rating_type) comment_rating_type 
+		LEFT JOIN (select comment_id 
+                        ,SUM(CASE WHEN comment_rating_type = 'like' then 1 else 0 end) comment_likes
+                        ,SUM(CASE WHEN comment_rating_type = 'dislike' then 1 else 0 end) comment_dislikes			 
+                    from comment_ratings group by comment_id) cr on cr.comment_id = c.comment_id
+                    left join (select comment_id, max(comment_rating_type) comment_rating_type 
 				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
         WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}'''
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
@@ -445,10 +439,8 @@ async def comment_interaction(response:Response, info:Request):
     comment_id = reqInfo["comment_id"]
     conn = engine().connect()
     if not interaction_type: conn.execute(f"DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id}")
-    else: conn.execute(f'''
-        DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id};
-        INSERT INTO comment_ratings (user_id, comment_id, comment_rating_type) VALUES ({user_id},{comment_id},'{interaction_type}')
-        ''')
+    else: conn.execute(f''' DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id};
+                    INSERT INTO comment_ratings (user_id, comment_id, comment_rating_type) VALUES ({user_id},{comment_id},'{interaction_type}') ''')
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
