@@ -51,6 +51,24 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     else: results = mainData()
     return results
 
+@app.post("/delete_data")
+async def delete_data(response:Response,info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    reqInfo = await info.json()
+    data_type = reqInfo["type"]
+    if data_type not in ["text", "author"]: return False
+    id = reqInfo["id"]
+    if reqInfo["deleted"] == True: deleted = False
+    else: deleted = True
+    if validateUser(reqInfo["user_id"], reqInfo["hash"]):
+        query = f'''UPDATE {data_type}s SET {data_type}_deleted = {deleted} WHERE {data_type}_id = {id} '''
+        conn = engine().connect()
+        conn.execute(query)
+        response.body = json.dumps(reqInfo).encode("utf-8")
+        response.status_code = 200
+        conn.close()
+
+
 @app.get("/official_lists")
 def extract_list(response:Response, language=None, country=None, query_type=None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
