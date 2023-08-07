@@ -236,7 +236,7 @@ async def createList(response:Response, info:Request):
     conn = engine().connect()
     checkIfExists = f"SELECT list_id from USER_LISTS where list_name = '{list_name}'"
     if pd.read_sql(checkIfExists, conn).empty:
-        conn.execute(f"INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES ({user_id}, {list_name}, {list_descr}, {list_type})")
+        conn.execute(f"INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES ({user_id}, '{list_name}', '{list_descr}', '{list_type}')")
         list_id = pd.read_sql(f"SELECT list_id FROM USER_LISTS where list_name = '{list_name}'", conn).to_dict("records")[0]["list_id"]
         conn.close()
         response.body = json.dumps({"list_id":list_id}).encode("utf-8")
@@ -321,6 +321,18 @@ async def update_user_list(response:Response, info:Request): #Update every list_
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
+
+@app.get("/user_list_references")
+def user_list_references(response:Response, type:str, id:int):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    query = f'''SELECT l.*, u.user_name, u.user_deleted
+            from user_lists l
+            left join user_lists_elements e on e.list_id = l.list_id
+            left join users u on u.user_id = l.user_id
+            where l.list_type = '{type}s' and e.value = {id} '''
+    lists = pd.read_sql(query, con=engine())
+    if lists.empty: return {}
+    else: return lists.fillna('').to_dict('records')
 
 @app.post("/user_list_interaction")
 async def user_list_interaction(response:Response, info:Request):
