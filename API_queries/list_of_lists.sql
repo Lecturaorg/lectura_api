@@ -15,9 +15,9 @@ select
     ,coalesce(dis.dislikes,0) dislikes
     ,coalesce(watch.watchlists,0) watchlists
 from official_lists l
-left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = l.list_id
-left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = l.list_id
-left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = l.list_id
+left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = l.list_id*-1
+left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = l.list_id*-1
+left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = l.list_id*-1
 
 union all
 

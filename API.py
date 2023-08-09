@@ -15,7 +15,11 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
-            query = f"select * from authors where author_id = '{str(id)}'"
+            query = f'''select a.*, case when watch=1 then true else false end as author_watch
+                        from authors a 
+                        left join (select count(*) watch, author_id from author_watch where user_id = {user_id} group by author_id) aw on aw.author_id = a.author_id 
+                        where a.author_id = '{str(id)}'
+                        '''
             author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
             return author
         if type == 'texts':
@@ -252,7 +256,12 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
     else: 
         list_type= "official"
         multiplier = -1
-    query = f'''SELECT L.*
+    query = f'''SELECT 	
+                    l.list_id*{multiplier} list_id
+                    ,l.list_name
+                    ,l.list_description
+                    ,l.list_type
+                    ,l.user_id
                     ,u.user_name 
                     ,coalesce(lik.likes,0) likes
                     ,coalesce(dis.dislikes,0) dislikes
@@ -433,6 +442,7 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
 		,c.comment_content
 		,c.comment_created_at
 		,c.comment_edited_at
+        ,c.comment_deleted
 		,coalesce(cr.comment_likes,0) likes
 		,coalesce(cr.comment_dislikes,0) dislikes
 		,U.USER_NAME 
@@ -444,7 +454,8 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
                     from comment_ratings group by comment_id) cr on cr.comment_id = c.comment_id
                     left join (select comment_id, max(comment_rating_type) comment_rating_type 
 				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
-        WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}'''
+        WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}
+        ORDER BY comment_deleted desc '''
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     def create_comment_tree(comments, parent_id=None):
         tree = []
@@ -476,21 +487,23 @@ async def comment_interaction(response:Response, info:Request):
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
 
-@app.post("/text_interaction")
-async def text_interaction(response:Response, info:Request):
+@app.post("/element_interaction")
+async def element_interaction(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
     user_id = reqInfo["user_id"]
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+    if not validateUser(user_id, reqInfo["hash"]): 
         response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
         response.status_code = 400
         return response    
-    text_id = reqInfo["text_id"]
     type = reqInfo["type"]
+    if type in ["checks, watch"]: element_type = "text"
+    else: element_type = "author"
+    id = reqInfo["id"]
     condition = reqInfo["condition"]
-    if not condition: query = f"DELETE FROM {type} WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};"
-    else: query = f'''DELETE FROM {type} WHERE USER_ID = {user_id} AND TEXT_ID = {text_id};
-                        INSERT INTO {type} (text_id, user_id) VALUES ({text_id},{user_id});'''
+    if not condition: query = f"DELETE FROM {type} WHERE USER_ID = {user_id} AND {element_type}_ID = {id};"
+    else: query = f'''DELETE FROM {type} WHERE USER_ID = {user_id} AND {element_type}_ID = {id};
+                        INSERT INTO {type} ({element_type}_id, user_id) VALUES ({id},{user_id});'''
     conn = engine().connect()
     conn.execute(query)
     conn.close()
