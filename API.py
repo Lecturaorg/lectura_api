@@ -5,9 +5,10 @@ import pandas as pd
 import numpy as np
 import secrets
 import hashlib
-from main_data import mainData
+from main_data import mainData, parseXML
 from sqlalchemy import text
 from urllib.parse import parse_qs
+import requests
 
 app = FastAPI()
 @app.get("/data")
@@ -510,3 +511,21 @@ async def element_interaction(response:Response, info:Request):
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
+
+@app.get("/source_data")
+def source_data(response:Response, author:str, title:str):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    url = "http://gallica.bnf.fr/SRU"
+    params = {
+        "version": "1.2",
+        "operation": "searchRetrieve",
+        "query": f'''(dc.creator all "{author}") and (dc.title all "{title}")''',
+        "startRecord": "1",
+        "maximumRecords": "20"
+    }
+    columns = ["creator", "date","description","language","publisher","source","title","type","subject","identifier"]
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        xml_data = response.content
+        return parseXML(xml_data, columns)
+    else: return response.status_code
