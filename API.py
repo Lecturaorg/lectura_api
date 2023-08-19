@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import secrets
 import hashlib
-from main_data import mainData, parseXML
+from main_data import mainData, parseXML, returnLabel
 from sqlalchemy import text
 from urllib.parse import parse_qs
 import requests
@@ -142,7 +142,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                         END,
                         ')')
                     END,'')) AS label'''
-            elif searchtype == "texts": variables+=''',text_id as value,split_part(author_id,',',1) author_id,text_title || 
+            elif searchtype == "texts": variables+=''',text_id as value,text_title || 
                 case
                     when text_original_publication_year is null then ' - ' 
                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
@@ -498,7 +498,7 @@ async def element_interaction(response:Response, info:Request):
         response.status_code = 400
         return response    
     type = reqInfo["type"]
-    if type in ["checks, watch"]: element_type = "text"
+    if type in ["checks", "watch"]: element_type = "text"
     else: element_type = "author"
     id = reqInfo["id"]
     condition = reqInfo["condition"]
@@ -513,19 +513,87 @@ async def element_interaction(response:Response, info:Request):
     return response
 
 @app.get("/source_data")
-def source_data(response:Response, author:str, title:str):
+def source_data(response:Response, author:str, title:str,label:str, type:str):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    url = "http://gallica.bnf.fr/SRU"
-    params = {
-        "version": "1.2",
-        "operation": "searchRetrieve",
-        "query": f'''(dc.creator all "{author}") and (dc.title all "{title}")''',
-        "startRecord": "1",
-        "maximumRecords": "20"
-    }
-    columns = ["creator", "date","description","language","publisher","source","title","type","subject","identifier"]
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        xml_data = response.content
-        return parseXML(xml_data, columns)
-    else: return response.status_code
+    if type == "bnf":
+        url = "http://gallica.bnf.fr/SRU"
+        params = {
+            "version": "1.2",
+            "operation": "searchRetrieve",
+            "query": f'''(dc.creator all "{author}") and (dc.title all "{title}")''',
+            "startRecord": "1",
+            "maximumRecords": "20"
+        }
+        columns = ["creator", "date","description","language","publisher","source","title","type","subject","identifier"]
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            xml_data = response.content
+            return parseXML(xml_data, columns)
+        else: return response.status_code
+
+@app.get("/user_data")
+def user_data(response:Response, user_id:int):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    def pd_dict(query): return pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
+    author_watch = f'''SELECT a.author_id
+                        ,{returnLabel("author")}
+                        ,author_name
+                        ,author_birth_country
+                        ,author_nationality
+                        ,author_q
+                        ,author_positions
+                FROM author_watch a
+                left join authors a2 on a2.author_id = a.author_id
+                where a.user_id={user_id} ''' #author_watch, checks, watch
+    text_watch = f'''SELECT t.text_id
+                ,{returnLabel("text")}
+                ,text_title
+                ,text_author
+                ,text_language
+                ,text_q
+                ,author_id
+                from watch w
+                left join texts t on t.text_id = w.text_id
+                where w.user_id = {user_id} '''
+    user_lists_watchlists = f'''SELECT w.list_id
+                ,l.list_name
+                ,l.list_description
+                ,l.list_type
+                ,l.list_created
+                ,u.user_name
+                from user_lists_watchlists w
+                left join user_lists l on l.list_id = w.list_id
+                left join users u on u.user_id = w.user_id
+                where w.user_id = {user_id} and l.list_deleted is not true'''
+    checks = f'''SELECT c.text_id
+                ,{returnLabel("text")}
+                ,text_title
+                ,text_author
+                ,text_language
+                ,text_q
+                ,author_id
+                from checks c
+                left join texts t on t.text_id = c.text_id '''
+    comments = f'''SELECT c.comment_id
+                ,comment_content
+                ,comment_type
+                ,comment_type_id
+                ,comment_created_at::date comment_created_at
+                ,case when comment_type = 'text' then t.author_id else null end as author_id
+                ,case when comment_type = 'list' then l.list_name else null end as list_name
+                from comments c
+                left join texts t on c.comment_type_id = text_id
+                left join user_lists l on l.list_id = c.comment_type_id
+                where c.user_id = {user_id} and c.comment_deleted is not true '''
+    lists = f'''SELECT l.list_id
+                ,l.list_name
+                ,l.list_description
+                ,l.list_type
+                ,l.list_created
+                ,u.user_name
+                from user_lists l
+                left join users u on u.user_id = l.user_id
+                where l.user_id = {user_id} and l.list_deleted is not true '''
+    return {"author_watch":pd_dict(author_watch), "watch":pd_dict(text_watch)
+            , "user_lists_watchlists":pd_dict(user_lists_watchlists),"checks":pd_dict(checks)
+            ,"comments":pd_dict(comments), "lists":pd_dict(lists)}

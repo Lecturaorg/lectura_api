@@ -6,8 +6,8 @@ import xml.etree.ElementTree as ET
 
 def mainData(type = None, limit = None):
     eng = engine()
-    authorQuery = '''SET statement_timeout = 60000; select * from authors_incl_label ORDER BY author_added_date desc LIMIT 5;'''
-    textQuery = '''SET statement_timeout = 60000; select * from texts_incl_label order by text_added_date desc LIMIT 5;'''
+    authorQuery = '''SET statement_timeout = 60000; select * from authors_incl_label WHERE label is not null ORDER BY author_added_date desc LIMIT 5;'''
+    textQuery = '''SET statement_timeout = 60000; select * from texts_incl_label WHERE label is not null order by text_added_date desc LIMIT 5;'''
     if limit != None:
         authorQuery = authorQuery.replace("5",limit)
         textQuery = textQuery.replace("5",limit)
@@ -32,3 +32,40 @@ def parseXML(xml, cols):
                 record_dict[col] = creator_list
         records.append(record_dict)
     return records
+
+def returnLabel(type):
+    if type=="author":
+        return '''CONCAT(
+                SPLIT_PART(author_name, ', ', 1),
+                COALESCE(
+                    CASE
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
+                    WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
+                            CASE 
+                                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                            END,
+                        ')')
+                    WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
+                        CASE
+                            WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+                            ELSE concat(author_birth_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    ELSE CONCAT(' (', ABS(author_birth_year), '-',
+                        CASE 
+                            WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                            ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    END,'')) AS label '''
+    elif type=="text":
+        return '''text_title || 
+                case
+                    when text_original_publication_year is null then ' - ' 
+                    when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+                    else ' (' || text_original_publication_year || ' AD' || ') - '
+                end
+                || coalesce(text_author,'Unknown')
+                as label '''

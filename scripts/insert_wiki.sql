@@ -153,11 +153,8 @@ where t.type in (
 group by 
 	t.book
 	,t."bookLabel"
-	--,t.author
-	--,l."languageLabel"
-	--,t.date
 ) agg
-where (publ_year <=2000 or publ_year is null) and "bookLabel" is not null;
+where (publ_year <=2000 or publ_year is null); --and "bookLabel" is not null;
 --Update texts with updated wiki data
 update texts t
 set text_title = t2.text_title
