@@ -38,18 +38,26 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                                 end as "bookLabel"
                                 ,case when c.text_id is not null then true else false end as checks
                                 ,case when w.text_id is not null then true else false end as watch
+                                ,case when f.text_id is not null then true else false end as favorites
+                                ,case when d.text_id is not null then true else false end as dislikes
                             from texts t
                             left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
                             left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
+                            left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
+                            left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
                             where author_id = '{str(id)}' '''
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
             else:
                 query = f'''select t.*
                             ,case when c.text_id is not null then true else false end as checks
                             ,case when w.text_id is not null then true else false end as watch
+                            ,case when f.text_id is not null then true else false end as favorites
+                            ,case when d.text_id is not null then true else false end as dislikes
                             from texts t
                             left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
                             left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
+                            left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
+                            left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
                             where t.text_id = '{str(id)}' '''
                 texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')[0]#.to_json(orient="table")
             return texts
@@ -253,9 +261,11 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
     response.headers['Access-Control-Allow-Origin'] = "*"
     if list_id>0: 
         list_type = "user"
+        addon=""
         multiplier = 1
     else: 
         list_type= "official"
+        addon=",list_url"
         multiplier = -1
     query = f'''SELECT 	
                     l.list_id*{multiplier} list_id
@@ -267,6 +277,7 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
                     ,coalesce(lik.likes,0) likes
                     ,coalesce(dis.dislikes,0) dislikes
                     ,coalesce(watch.watchlists,0) watchlists
+                    {addon}
                 FROM {list_type}_LISTS L 
                 left join USERS u on u.user_id=l.user_id
                 left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = L.list_id*{multiplier}
@@ -293,6 +304,7 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         list_info = lists.to_dict('records')[0]
         if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
         elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
+        else: detail_query = f'SELECT * FROM USER_LISTS_ELEMENTS WHERE LIST_ID = {list_id}'
         detail_query = detail_query.replace('[$user_id]',str(user_id))
         list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine())
         if not list_elements.empty: list_elements = list_elements.fillna('').to_dict('records')
@@ -498,7 +510,7 @@ async def element_interaction(response:Response, info:Request):
         response.status_code = 400
         return response    
     type = reqInfo["type"]
-    if type in ["checks", "watch"]: element_type = "text"
+    if type in ["checks", "watch", "favorites","dislikes"]: element_type = "text"
     else: element_type = "author"
     id = reqInfo["id"]
     condition = reqInfo["condition"]
@@ -594,6 +606,24 @@ def user_data(response:Response, user_id:int):
                 from user_lists l
                 left join users u on u.user_id = l.user_id
                 where l.user_id = {user_id} and l.list_deleted is not true '''
+    favorites = f'''SELECT f.text_id
+                ,{returnLabel("text")}
+                ,text_title
+                ,text_author
+                ,text_language
+                ,text_q
+                ,author_id
+                from favorites f
+                left join texts t on t.text_id = f.text_id '''
+    dislikes = f'''SELECT d.text_id
+                ,{returnLabel("text")}
+                ,text_title
+                ,text_author
+                ,text_language
+                ,text_q
+                ,author_id
+                from dislikes d
+                left join texts t on t.text_id = d.text_id '''
     return {"author_watch":pd_dict(author_watch), "watch":pd_dict(text_watch)
             , "user_lists_watchlists":pd_dict(user_lists_watchlists),"checks":pd_dict(checks)
-            ,"comments":pd_dict(comments), "lists":pd_dict(lists)}
+            ,"comments":pd_dict(comments), "lists":pd_dict(lists), "favorites":pd_dict(favorites), "dislikes":pd_dict(dislikes)}
