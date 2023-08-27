@@ -624,6 +624,27 @@ def user_data(response:Response, user_id:int):
                 ,author_id
                 from dislikes d
                 left join texts t on t.text_id = d.text_id '''
+    list_favorites = f'''SELECT l.list_id
+                ,l.list_name
+                ,l.list_description
+                ,l.list_type
+                ,l.list_created
+                ,u.user_name
+                from user_lists_likes lik
+                left join user_lists l on l.list_id = lik.list_id
+                left join users u on u.user_id = l.user_id
+                where lik.user_id = {user_id} and l.list_deleted is not true '''
+    list_dislikes = f'''SELECT l.list_id
+                ,l.list_name
+                ,l.list_description
+                ,l.list_type
+                ,l.list_created
+                ,u.user_name
+                from user_lists_dislikes dislik
+                left join user_lists l on l.list_id = dislik.list_id
+                left join users u on u.user_id = l.user_id
+                where dislik.user_id = {user_id} and l.list_deleted is not true '''
     return {"author_watch":pd_dict(author_watch), "watch":pd_dict(text_watch)
             , "user_lists_watchlists":pd_dict(user_lists_watchlists),"checks":pd_dict(checks)
-            ,"comments":pd_dict(comments), "lists":pd_dict(lists), "favorites":pd_dict(favorites), "dislikes":pd_dict(dislikes)}
+            ,"comments":pd_dict(comments), "lists":pd_dict(lists), "favorites":pd_dict(favorites), "dislikes":pd_dict(dislikes)
+            ,"list_favorites":pd_dict(list_favorites), "list_dislikes":pd_dict(list_dislikes)}
