@@ -1,28 +1,34 @@
 SET statement_timeout = 60000;
-    select 
-        value
-        ,type
-        ,a.author_id::varchar(255) as author_id
-        ,label
-    from (
-    select 
-        text_id as value
-        ,'text' as type
-        ,text_title || 
-        case
-            when text_original_publication_year is null then ' - ' 
-            when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
-            else ' (' || text_original_publication_year || ' AD' || ') - '
-        end
-        || coalesce(text_author,'Unknown')
-        as label
-        ,text_author_q
-        from texts t
-    WHERE to_tsvector('english', immutable_concat_ws(' ',ARRAY[text_title,text_author])) @@ plainto_tsquery('english', %(query)s) 
-    ) t
-    left join (select distinct author_q, author_id from authors) a on a.author_q = t.text_author_q
-    UNION ALL
-    select 
+select 
+	value
+	,type
+	,a.author_id::varchar(255) as author_id
+	,label
+from (
+select 
+	text_id as value
+	,'text' as type
+	,text_title || 
+	case
+		when text_original_publication_year is null then ' - ' 
+		when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+		else ' (' || text_original_publication_year || ' AD' || ') - '
+	end
+	|| coalesce(text_author,'Unknown')
+	as label
+	,text_author_q
+	from texts t
+WHERE text_title ilike %(query)s or text_author ilike %(query)s
+) t
+left join (select distinct author_q, author_id from authors) a on a.author_q = t.text_author_q
+UNION ALL
+select 
+	value
+	,type
+	,author_id
+	,label
+from (
+    select
     author_id as value
     ,'author' as type
     ,null as author_id
@@ -57,5 +63,9 @@ SET statement_timeout = 60000;
         ''
     )
     ) AS label
-    FROM authors
-    WHERE to_tsvector('english', immutable_concat_ws(' ', ARRAY[coalesce(author_name,''), coalesce(author_nationality,''), coalesce(author_positions,''), coalesce(author_birth_city,''), coalesce(author_birth_country,''), coalesce(author_name_language,'')])) @@ plainto_tsquery('english', %(query)s) 
+    FROM authors a
+	left join AUTHOR_LABELS lab on lab.author = a.author_q
+	where author_name ilike %(query)s or lab.author_label ilike %(query)s or author_nationality ilike %(query)s
+		or author_positions ilike %(query)s or author_birth_city ilike %(query)s or author_birth_country ilike %(query)s
+		or author_name_language ilike %(query)s
+) ag

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 def mainData(type = None, limit = None):
     eng = engine()
     authorQuery = '''SET statement_timeout = 60000; select * from authors_incl_label WHERE label is not null ORDER BY author_added_date desc LIMIT 5;'''
-    textQuery = '''SET statement_timeout = 60000; select * from texts_incl_label WHERE label is not null order by text_added_date desc LIMIT 5;'''
+    textQuery = '''SET statement_timeout = 60000; select * from texts_incl_label WHERE label is not null and author_id is not null order by text_added_date desc LIMIT 5;'''
     if limit != None:
         authorQuery = authorQuery.replace("5",limit)
         textQuery = textQuery.replace("5",limit)

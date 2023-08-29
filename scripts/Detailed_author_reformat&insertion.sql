@@ -54,7 +54,7 @@ SELECT
 	end) author_death_day
 	,string_agg(distinct "deathplaceLabel", ', ') author_death_city
 	,string_agg(distinct "deathplacecountryLabel", ', ') author_death_country
-	,string_agg(distinct floruit, ', ') author_floruit
+	,max(floruit::varchar(255)) author_floruit
 	,string_agg(distinct "occupationsLabel", ', ') author_positions
 	,string_agg(distinct "languagesLabel", ', ') author_name_language
 	,string_agg(distinct "spouseLabel", ', ') author_spouse
@@ -106,12 +106,12 @@ coalesce(a.author_name,a2.author_name) as author_name
 	else coalesce(a.author_floruit,a2.author_floruit) 
 end as author_floruit
 ,a.author_q as author_q
-,coalesce(a.author_wikipedia, a2.author_wikipedia) as author_wikipedia
+,a.author_wikipedia as author_wikipedia
 from WIKIAUTHOR_DETAILS_TEMP a
 join authors a2 on a2.author_q = a.author_q
 where coalesce(a.author_name,a2.author_name) is not null
 ) a2
-where a2.author_q = a.author_q and a.author_q is not null;
+where a2.author_q = a.author_q;
 DROP TABLE IF EXISTS WIKIAUTHOR_DETAILS_TEMP;
 
 ---Wikitexts
@@ -190,8 +190,8 @@ set text_title = t2.text_title
 	text_original_publication_year = t2.text_original_publication_year,
 	text_original_publication_month = t2.text_original_publication_month,
 	text_original_publication_day = t2.text_original_publication_day,
-	text_author_q = t2.text_author_q,
-	text_wikipedia = t2.text_wikipedia
+	text_author_q = t2.text_author_q,text_wikipedia = t2.text_wikipedia
+	,text_description = t2.text_description, text_image = t2.text_image
 from (
 select 
 	coalesce(CASE 
@@ -219,6 +219,25 @@ select
 	,text_q
 	,text_author_q
 	,text_wikipedia
+	,text_desc as text_description
+	,text_image_url as text_image
 from WIKITEXT_DETAILS_TEMP) t2
 where t.text_q = t2.text_q and t.text_q is not null;
 DROP TABLE IF EXISTS WIKITEXT_DETAILS_TEMP;
+
+--Label simplifications for search
+DROP TABLE IF EXISTS AUTHOR_LABELS, TEXT_LABELS;
+SELECT 
+author
+,string_agg(distinct "authorLabel", ', ') author_label
+INTO AUTHOR_LABELS
+FROM WIKIAUTHOR_LABELS
+group by author;
+INSERT INTO TEXT_LABELS
+SELECT 
+text_q
+,string_agg(distinct "textLabel", ', ') text_label
+FROM WIKITEXT_LABELS l
+left join TEXT_LABELS l2 on l2.text_q = l.text_q
+group by text_q;
+select 
