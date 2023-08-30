@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from dotenv import load_dotenv
 import os
 import pandas as pd
+import numpy as np
 
 #Set up the connection to the database
 def engine():
@@ -23,3 +24,4 @@ def validateUser(user,hash):
     validation = pd.read_sql(query, con=engine())
     if validation is validation.empty: return False
     else: return True
+def pd_dict(query): return pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')

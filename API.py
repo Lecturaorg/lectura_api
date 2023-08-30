@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Response, Request
 import json
-from sql_funcs import engine, read_sql, validateUser
+from sql_funcs import engine, read_sql, validateUser, pd_dict
 import pandas as pd
 import numpy as np
 import secrets
 import hashlib
-from main_data import mainData, parseXML, returnLabel
+from main_data import mainData, parseXML, returnLabel, profileViewData
 from sqlalchemy import text
 from urllib.parse import parse_qs
 import requests
@@ -21,7 +21,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                         left join (select count(*) watch, author_id from author_watch where user_id = {user_id} group by author_id) aw on aw.author_id = a.author_id 
                         where a.author_id = '{str(id)}'
                         '''
-            author = pd.read_sql(query,con=engine()).replace(np.nan,None).to_dict('records')[0]
+            author = pd_dict(query)[0]
             return author
         if type == 'texts':
             if by == "author":
@@ -46,7 +46,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                             left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
                             left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
                             where author_id = '{str(id)}' '''
-                texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')
+                texts = pd_dict(query)
             else:
                 query = f'''select t.*
                             ,case when c.text_id is not null then true else false end as checks
@@ -59,7 +59,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                             left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
                             left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
                             where t.text_id = '{str(id)}' '''
-                texts = pd.read_sql(query, con=engine()).replace(np.nan, None).to_dict('records')[0]#.to_json(orient="table")
+                texts = pd_dict(query)[0]#.to_json(orient="table")
             return texts
     else: results = mainData()
     return results
@@ -195,7 +195,7 @@ async def createUser(response:Response,info:Request):
         response.status_code = 200
     else:
         hashedPassword = reqInfo["user_password"]
-        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password) VALUES (%s, %s, %s)", (username, email, hashedPassword))
+        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password, user_role) VALUES (%s, %s, %s)", (username, email, hashedPassword, 'basic'))
         response.body = json.dumps({"user_id": pd.read_sql(query, conn).to_dict("records")[0]["user_id"]}).encode("utf-8")
         response.status_code = 200
         conn.close()
@@ -206,7 +206,7 @@ def login(response:Response,request:Request, user):
     response.headers['Access-Control-Allow-Origin'] = "*"
     if "@" in user: login_col = "user_email"
     else: login_col = "user_name"
-    query = "SELECT user_id, user_name, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
+    query = "SELECT user_id, user_name,user_role, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
     conn = engine().connect()
     df = pd.read_sql_query(query, conn)
     if df.empty: return False
@@ -221,7 +221,7 @@ def login(response:Response,request:Request, user):
                         INSERT INTO USER_SESSIONS (HASH, USER_ID) VALUES ('{hashed_data}', {df["user_id"]})'''
         conn.execute(sessionQuery)
         return {"pw":df["hashed_password"].tobytes().decode('utf-8'),"hash":hashed_data
-                ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"]}
+                ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"], "user_role":df["user_role"]}
 
 @app.post("/delete_user")
 async def delete_user(response:Response, info:Request):
@@ -530,11 +530,9 @@ def source_data(response:Response, author:str, title:str,label:str, type:str):
     if type == "bnf":
         url = "http://gallica.bnf.fr/SRU"
         params = {
-            "version": "1.2",
-            "operation": "searchRetrieve",
+            "version": "1.2", "operation": "searchRetrieve",
             "query": f'''(dc.creator all "{author}") and (dc.title all "{title}")''',
-            "startRecord": "1",
-            "maximumRecords": "20"
+            "startRecord": "1","maximumRecords": "20"
         }
         columns = ["creator", "date","description","language","publisher","source","title","type","subject","identifier"]
         response = requests.get(url, params=params)
@@ -543,108 +541,36 @@ def source_data(response:Response, author:str, title:str,label:str, type:str):
             return parseXML(xml_data, columns)
         else: return response.status_code
 
+@app.get("/admin_data")
+def admin_data(response:Response, user_id:int, hash:str, data_type:str):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    if not validateUser(user_id, hash): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response    
+    if data_type=="users":
+        query = "SELECT user_name, user_role, user_id, user_created from users where user_deleted is not true"
+        return pd_dict(query)
+
+@app.post("/update_user_role")
+async def update_user_role(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    change_user = reqInfo["change_user"]
+    new_role = reqInfo["new_role"]
+    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
+    query = f"UPDATE USERS SET USER_ROLE = '{new_role}' WHERE USER_ID = {change_user}"
+    conn = engine().connect()
+    conn.execute(query)
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
+
 @app.get("/user_data")
 def user_data(response:Response, user_id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    def pd_dict(query): return pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
-    author_watch = f'''SELECT a.author_id
-                        ,{returnLabel("author")}
-                        ,author_name
-                        ,author_birth_country
-                        ,author_nationality
-                        ,author_q
-                        ,author_positions
-                FROM author_watch a
-                left join authors a2 on a2.author_id = a.author_id
-                where a.user_id={user_id} ''' #author_watch, checks, watch
-    text_watch = f'''SELECT t.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
-                ,author_id
-                from watch w
-                left join texts t on t.text_id = w.text_id
-                where w.user_id = {user_id} '''
-    user_lists_watchlists = f'''SELECT w.list_id
-                ,l.list_name
-                ,l.list_description
-                ,l.list_type
-                ,l.list_created
-                ,u.user_name
-                from user_lists_watchlists w
-                left join user_lists l on l.list_id = w.list_id
-                left join users u on u.user_id = w.user_id
-                where w.user_id = {user_id} and l.list_deleted is not true'''
-    checks = f'''SELECT c.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
-                ,author_id
-                from checks c
-                left join texts t on t.text_id = c.text_id '''
-    comments = f'''SELECT c.comment_id
-                ,comment_content
-                ,comment_type
-                ,comment_type_id
-                ,comment_created_at::date comment_created_at
-                ,case when comment_type = 'text' then t.author_id else null end as author_id
-                ,case when comment_type = 'list' then l.list_name else null end as list_name
-                from comments c
-                left join texts t on c.comment_type_id = text_id
-                left join user_lists l on l.list_id = c.comment_type_id
-                where c.user_id = {user_id} and c.comment_deleted is not true '''
-    lists = f'''SELECT l.list_id
-                ,l.list_name
-                ,l.list_description
-                ,l.list_type
-                ,l.list_created
-                ,u.user_name
-                from user_lists l
-                left join users u on u.user_id = l.user_id
-                where l.user_id = {user_id} and l.list_deleted is not true '''
-    favorites = f'''SELECT f.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
-                ,author_id
-                from favorites f
-                left join texts t on t.text_id = f.text_id '''
-    dislikes = f'''SELECT d.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
-                ,author_id
-                from dislikes d
-                left join texts t on t.text_id = d.text_id '''
-    list_favorites = f'''SELECT l.list_id
-                ,l.list_name
-                ,l.list_description
-                ,l.list_type
-                ,l.list_created
-                ,u.user_name
-                from user_lists_likes lik
-                left join user_lists l on l.list_id = lik.list_id
-                left join users u on u.user_id = l.user_id
-                where lik.user_id = {user_id} and l.list_deleted is not true '''
-    list_dislikes = f'''SELECT l.list_id
-                ,l.list_name
-                ,l.list_description
-                ,l.list_type
-                ,l.list_created
-                ,u.user_name
-                from user_lists_dislikes dislik
-                left join user_lists l on l.list_id = dislik.list_id
-                left join users u on u.user_id = l.user_id
-                where dislik.user_id = {user_id} and l.list_deleted is not true '''
-    return {"author_watch":pd_dict(author_watch), "watch":pd_dict(text_watch)
-            , "user_lists_watchlists":pd_dict(user_lists_watchlists),"checks":pd_dict(checks)
-            ,"comments":pd_dict(comments), "lists":pd_dict(lists), "favorites":pd_dict(favorites), "dislikes":pd_dict(dislikes)
-            ,"list_favorites":pd_dict(list_favorites), "list_dislikes":pd_dict(list_dislikes)}
+    return profileViewData(user_id)
