@@ -206,7 +206,7 @@ def login(response:Response,request:Request, user):
     response.headers['Access-Control-Allow-Origin'] = "*"
     if "@" in user: login_col = "user_email"
     else: login_col = "user_name"
-    query = "SELECT user_id, user_name,user_role, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user.lower())
+    query = "SELECT user_id, user_name,user_role, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user)
     conn = engine().connect()
     df = pd.read_sql_query(query, conn)
     if df.empty: return False
@@ -574,3 +574,22 @@ async def update_user_role(response:Response, info:Request):
 def user_data(response:Response, user_id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
     return profileViewData(user_id)
+
+@app.post("/update_user_data")
+async def update_user_data(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    change_type = reqInfo["change_type"]
+    change_value = reqInfo["change_value"]
+    user_id = reqInfo["user_id"]
+    if not validateUser(user_id, reqInfo["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
+    query = f'''UPDATE USERS SET {change_type} = '{change_value}' WHERE user_id = {user_id}'''
+    conn = engine().connect()
+    conn.execute(query)
+    conn.close()
+    response.status_code = 200
+    response.body = json.dumps(reqInfo).encode('utf-8')
+    return response
