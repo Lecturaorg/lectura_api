@@ -7,7 +7,6 @@ select
     ,null as list_modified
     ,null as user_id
     ,null as user_name
-    ,null as user_deleted
     ,list_url
     ,null as list_deleted
     ,'official' as tab
@@ -30,7 +29,6 @@ select
     ,list_modified
     ,l.user_id
     ,u.user_name
-    ,u.user_deleted
     ,null as list_url
     ,list_deleted
     ,'personal' as tab

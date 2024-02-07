@@ -158,13 +158,18 @@ def search(info: Request,response: Response, query, searchtype = None):
                 end
                 || coalesce(text_author,'Unknown')
                 as label'''
-            filterString = ""
-            for n in range(len(filters)): #varlist should be a body in API request and optional
-                var = filters[n]
-                if var["value"]=="label": continue
-                variables += ","+ var["value"] + '''::varchar(255) "''' + var["value"] + '''" \n''' #Add every search variable
-                if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
-                else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
+            filterString = ""            
+            if len(filters)>0:
+                for n in range(len(filters)): #varlist should be a body in API request and optional
+                    var = filters[n]
+                    if var["value"]=="label": continue
+                    variables += ","+ var["value"] + '''::varchar(255) "''' + var["value"] + '''" \n''' #Add every search variable
+                    if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
+                    else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
+            else:
+                if searchtype == "authors": filterString += "author_name::varchar(255) ILIKE '%" + query + "%'"
+                elif searchtype == "texts": 
+                    filterString += "text_name::varchar(255) ILIKE '%" + query + "%'" + " OR \n text_author ILIKE '%" + query + "%'"
             query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString)
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
@@ -188,15 +193,15 @@ async def createUser(response:Response,info:Request):
     email = reqInfo["user_email"].lower()
     username = reqInfo["user_name"].lower()
     conn = engine().connect()
-    query = f"SELECT * FROM users WHERE user_email = '{email}' or user_name = '{username}'"
+    query = f"SELECT user_id FROM users WHERE user_email = '{email}' or user_name = '{username}'"
     df = pd.read_sql_query(query, conn)
     if not df.empty: 
         response.body = json.dumps({"message": "Duplicate"}).encode("utf-8")
         response.status_code = 200
     else:
         hashedPassword = reqInfo["user_password"]
-        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password, user_role) VALUES (%s, %s, %s)", (username, email, hashedPassword, 'basic'))
-        response.body = json.dumps({"user_id": pd.read_sql(query, conn).to_dict("records")[0]["user_id"]}).encode("utf-8")
+        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password, user_role) VALUES (%s, %s, %s, %s)", (username, email, hashedPassword, 'basic'))
+        response.body = json.dumps(profileViewData(pd.read_sql(query, conn).to_dict("records")[0]["user_id"])).encode("utf-8")
         response.status_code = 200
         conn.close()
     return response
@@ -229,8 +234,13 @@ async def delete_user(response:Response, info:Request):
     response.headers['Content-Type'] = 'application/json'
     reqInfo = await info.json()
     if not validateUser(reqInfo["user_id"], reqInfo["hash"]): return
+    user_name = reqInfo["user_name"]
+    user_id = reqInfo["user_id"]
     conn = engine().connect()
-    conn.execute("UPDATE USERS SET HASHED_PASSWORD = NULL, USER_EMAIL = NULL, USER_NAME = '(deleted)_%s' WHERE USER_ID = %s" % (reqInfo["user_name"], reqInfo["user_id"]))
+    conn.execute(f'''DELETE FROM DELETED_USERS WHERE USER_NAME = '{user_name}' and USER_ID = '{user_id}';
+                    INSERT INTO DELETED_USERS (user_id, user_name, user_email, user_role, user_created, hashed_password) SELECT * FROM USERS WHERE USER_NAME = '{user_name}' AND USER_ID = '{user_id}';
+                    DELETE FROM USER_SESSIONS WHERE USER_ID = '{user_id}';
+                    DELETE FROM USERS WHERE USER_NAME = '{user_name}' and USER_ID = '{user_id}'; ''')
     conn.close()
 
 @app.post("/create_list")
@@ -347,7 +357,7 @@ async def update_user_list(response:Response, info:Request): #Update every list_
 @app.get("/user_list_references")
 def user_list_references(response:Response, type:str, id:int):
     response.headers['Access-Control-Allow-Origin'] = "*"
-    query = f'''SELECT l.*, u.user_name, u.user_deleted
+    query = f'''SELECT l.*, u.user_name
             from user_lists l
             left join user_lists_elements e on e.list_id = l.list_id
             left join users u on u.user_id = l.user_id
@@ -549,7 +559,7 @@ def admin_data(response:Response, user_id:int, hash:str, data_type:str):
         response.status_code = 400
         return response    
     if data_type=="users":
-        query = "SELECT user_name, user_role, user_id, user_created from users where user_deleted is not true"
+        query = '''SELECT user_name, user_role, user_id, user_created from users where user_name not ilike '%%deleted%%' and user_role != 'administrator' '''
         return pd_dict(query)
 
 @app.post("/update_user_role")

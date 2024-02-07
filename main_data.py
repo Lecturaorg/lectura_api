@@ -109,7 +109,8 @@ def profileViewData(user_id):
                 ,text_q
                 ,author_id
                 from checks c
-                left join texts t on t.text_id = c.text_id '''
+                left join texts t on t.text_id = c.text_id
+                where c.user_id = {user_id} '''
     comments = f'''SET statement_timeout = 60000;SELECT c.comment_id
                 ,c.comment_content
                 ,c.comment_type
@@ -175,7 +176,8 @@ def profileViewData(user_id):
                 ,text_q
                 ,author_id
                 from favorites f
-                left join texts t on t.text_id = f.text_id '''
+                left join texts t on t.text_id = f.text_id
+                where f.user_id = {user_id} '''
     dislikes = f'''SELECT d.text_id
                 ,{returnLabel("text")}
                 ,text_title
@@ -184,7 +186,8 @@ def profileViewData(user_id):
                 ,text_q
                 ,author_id
                 from dislikes d
-                left join texts t on t.text_id = d.text_id '''
+                left join texts t on t.text_id = d.text_id
+                where d.user_id = {user_id} '''
     list_favorites = f'''SELECT l.list_id
                 ,l.list_name
                 ,l.list_description
