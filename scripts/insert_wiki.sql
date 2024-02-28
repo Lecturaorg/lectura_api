@@ -195,7 +195,7 @@ select
 	,authorq as text_author_q
 from wikitexts_reform) t2
 where t.text_q = t2.text_q and t.text_q is not null;
-
+--select distinct country from wikitexts
 --Update existing authors with updated data from wikidata
 UPDATE AUTHORS a
 set author_name = a2.author_name, author_nationality = a2.author_nationality
@@ -316,7 +316,9 @@ FROM (select text_q
 LEFT JOIN authors a ON a.author_q = t.text_author_q
 group by t.text_q) a
 WHERE a.author_q = t.text_author_q and t.author_id is null and t.text_author_q is not null;
-
+/*select * from texts
+where text_title is null
+order by text_added_date desc*/
 --Find duplicates and label them
 	--Author duplicates
 /*UPDATE authors a

@@ -72,21 +72,13 @@ def returnLabel(type):
 
 def profileViewData(user_id):
     author_watch = f'''SELECT a.author_id
-                        ,{returnLabel("author")}
-                        ,author_name
-                        ,author_birth_country
-                        ,author_nationality
-                        ,author_q
-                        ,author_positions
+                        ,replace(author_q, 'http://www.wikidata.org/entity/', '') author_q
                 FROM author_watch a
                 left join authors a2 on a2.author_id = a.author_id
                 where a.user_id={user_id} ''' #author_watch, checks, watch
     text_watch = f'''SELECT t.text_id
-                ,{returnLabel("text")}
+                ,replace(text_q, 'http://www.wikidata.org/entity/', '') text_q
                 ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
                 ,author_id
                 from watch w
                 left join texts t on t.text_id = w.text_id
@@ -102,11 +94,8 @@ def profileViewData(user_id):
                 left join users u on u.user_id = w.user_id
                 where w.user_id = {user_id} and l.list_deleted is not true'''
     checks = f'''SELECT c.text_id
-                ,{returnLabel("text")}
+                ,replace(text_q, 'http://www.wikidata.org/entity/', '') text_q
                 ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
                 ,author_id
                 from checks c
                 left join texts t on t.text_id = c.text_id
@@ -169,21 +158,13 @@ def profileViewData(user_id):
                 left join users u on u.user_id = l.user_id
                 where l.user_id = {user_id} and l.list_deleted is not true '''
     favorites = f'''SELECT f.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
+                ,replace(text_q, 'http://www.wikidata.org/entity/', '') text_q
                 ,author_id
                 from favorites f
                 left join texts t on t.text_id = f.text_id
                 where f.user_id = {user_id} '''
     dislikes = f'''SELECT d.text_id
-                ,{returnLabel("text")}
-                ,text_title
-                ,text_author
-                ,text_language
-                ,text_q
+                ,replace(text_q, 'http://www.wikidata.org/entity/', '') text_q
                 ,author_id
                 from dislikes d
                 left join texts t on t.text_id = d.text_id

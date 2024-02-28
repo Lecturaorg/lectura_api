@@ -30,6 +30,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                                 ,text_title as "titleLabel"
                                 ,text_author
                                 ,text_q
+                                ,replace(a.author_q, 'http://www.wikidata.org/entity/','') as author_q
                                 ,text_title || 
                                 case
                                     when text_original_publication_year is null then ' ' 
@@ -41,11 +42,12 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
                                 ,case when f.text_id is not null then true else false end as favorites
                                 ,case when d.text_id is not null then true else false end as dislikes
                             from texts t
+                            left join authors a on a.author_id::integer = t.author_id::integer
                             left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
                             left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
                             left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
                             left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
-                            where author_id = '{str(id)}' '''
+                            where t.author_id = '{str(id)}' '''
                 texts = pd_dict(query)
             else:
                 query = f'''select t.*
@@ -63,6 +65,14 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
             return texts
     else: results = mainData()
     return results
+
+@app.get("/labels")
+def data(response: Response, lang:str = None):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    query = f'''SELECT label_loc, label_value from labels where language = '{lang}' '''
+    labels = pd.read_sql(query,con=engine()).drop_duplicates()
+    labels = dict(zip(labels['label_loc'], labels['label_value']))
+    return labels
 
 @app.post("/delete_data")
 async def delete_data(response:Response,info:Request):
@@ -321,6 +331,37 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         else: list_elements = []
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
+
+@app.get("/get_element_user_lists")
+def get_element_user_lists(response:Response, list_type:str, type_id:int,user_id:int=None, hash:str=None):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    if validateUser(user_id, hash):
+        lists = f'''select distinct l.list_name
+		,l.list_id
+		,e.element_id
+		,e.value
+		,l.list_type
+        ,true as in_list
+        from user_lists l
+        left join user_lists_elements e on e.list_id = l.list_id
+        where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}' and e.value = {type_id}
+        union all
+        select distinct list_name
+		,l.list_id
+		,0 as element_id
+		,0 as value
+		,l.list_type
+        ,false in_list
+        from user_lists l
+        where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}'
+		and l.list_id not in (
+			select distinct 
+			l.list_id
+        	from user_lists l
+        	left join user_lists_elements e on e.list_id = l.list_id
+        	where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}' and e.value = {type_id}) '''
+        df = pd.read_sql(lists, con=engine()).to_dict('records')
+        return df
 
 @app.post("/update_user_list")
 async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
