@@ -257,20 +257,23 @@ async def delete_user(response:Response, info:Request):
 async def createList(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
     reqInfo = await info.json()
-    user_id = reqInfo["user_id"]
-    hash = reqInfo["hash"]
+    print(reqInfo)
+    params = reqInfo["list_info"]
+    user_id = params["user_id"]
+    hash = params["hash"]
     if not validateUser(user_id, hash): 
         response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
         response.status_code = 400
         return response
-    list_name = reqInfo["list_name"]
-    list_descr = reqInfo["list_description"]
-    list_type = reqInfo["list_type"]
+    list_name = params["list_name"]
+    list_descr = params["list_description"]
+    list_type = params["list_type"]
     conn = engine().connect()
     checkIfExists = f"SELECT list_id from USER_LISTS where list_name = '{list_name}'"
     if pd.read_sql(checkIfExists, conn).empty:
         conn.execute(f"INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES ({user_id}, '{list_name}', '{list_descr}', '{list_type}')")
         list_id = pd.read_sql(f"SELECT list_id FROM USER_LISTS where list_name = '{list_name}'", conn).to_dict("records")[0]["list_id"]
+        postUpdates(reqInfo,list_id)
         conn.close()
         response.body = json.dumps({"list_id":list_id}).encode("utf-8")
         response.status_code = 200
@@ -363,20 +366,12 @@ def get_element_user_lists(response:Response, list_type:str, type_id:int,user_id
         df = pd.read_sql(lists, con=engine()).to_dict('records')
         return df
 
-@app.post("/update_user_list")
-async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    list_info = reqInfo["list_info"]
-    list_id = list_info["list_id"]
-    additions = reqInfo["additions"]
-    removals = reqInfo["removals"]
-    order_changes = reqInfo["order_changes"]
-    delete = reqInfo["delete"]
+def postUpdates(changes,list_id):
+    list_info = changes["list_info"]
+    additions = changes["additions"]
+    removals = changes["removals"]
+    order_changes = changes["order_changes"]
+    delete = changes["delete"]
     conn = engine().connect()
     if len(additions)>0:
         for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
@@ -387,10 +382,23 @@ async def update_user_list(response:Response, info:Request): #Update every list_
             conn.execute("UPDATE USER_LISTS_ELEMENTS SET ORDER_RANK = %s WHERE ELEMENT_ID = %s",(n, order_changes[n]["element_id"]))
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
-            conn.execute(f"UPDATE USER_LISTS SET {element} = '{list_info[element]}' WHERE LIST_ID = {list_id}")
+            if element not in ["hash", "user_id"]:
+                conn.execute(f"UPDATE USER_LISTS SET {element} = '{list_info[element]}' WHERE LIST_ID = {list_id}")
     if delete: conn.execute(f"UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = {list_id}")
     conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED = CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
     conn.close()
+
+
+@app.post("/update_user_list")
+async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    reqInfo = await info.json()
+    if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
+        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
+        response.status_code = 400
+        return response
+    list_id = reqInfo["list_id"]
+    postUpdates(reqInfo)
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
