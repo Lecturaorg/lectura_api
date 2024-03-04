@@ -528,6 +528,8 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
 				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
         WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}
         ORDER BY comment_deleted desc '''
+    if comment_type == "text": 
+        query = query.replace("LEFT JOIN (", "LEFT JOIN TEXTS t on t.text_id = c.comment_type_id \n LEFT JOIN (").replace(",U.USER_NAME",",t.author_id \n ,U.USER_NAME")
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     def create_comment_tree(comments, parent_id=None):
         tree = []
