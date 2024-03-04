@@ -397,8 +397,8 @@ async def update_user_list(response:Response, info:Request): #Update every list_
         response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
         response.status_code = 400
         return response
-    list_id = reqInfo["list_id"]
-    postUpdates(reqInfo)
+    list_id = reqInfo["list_info"]["list_id"]
+    postUpdates(reqInfo, list_id)
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
