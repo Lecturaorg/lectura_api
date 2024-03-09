@@ -9,6 +9,7 @@ select
     ,null as user_name
     ,list_url
     ,null as list_deleted
+    ,null as list_private
     ,'official' as tab
     ,coalesce(lik.likes,0) likes
     ,coalesce(dis.dislikes,0) dislikes
@@ -31,6 +32,7 @@ select
     ,u.user_name
     ,null as list_url
     ,list_deleted
+    ,list_private
     ,'personal' as tab
     ,coalesce(lik.likes,0) likes
     ,coalesce(dis.dislikes,0) dislikes

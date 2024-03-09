@@ -111,23 +111,20 @@ def search(info: Request,response: Response, query, searchtype = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     params = info.query_params
     query = query.replace("'","''").strip()
-    allQuery = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/search_all.sql")
     search_params = {"query": f"%{query}%"}
     if searchtype == None:
+        allQuery = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/search_all.sql")
         queryList = query.split(' ')
         if len(queryList) == 1:
             results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates().to_dict("records")
             return results
         else:
-            results = False
+            results = None
             for subQuery in queryList:
                 search_params["query"]=f"%{subQuery}%"
-                if isinstance(results, pd.DataFrame):
-                    newResults = pd.read_sql(allQuery,con=engine(),params=search_params)
-                    results = pd.merge(results,newResults,how="inner")
-                else: results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates()
-            results = results.to_dict('records'); #.head(5)
-            return results
+                sub_results = pd.read_sql(allQuery, con=engine(), params=search_params)
+                results = sub_results if results is None else pd.merge(results, sub_results, how="inner")
+            return results.to_dict('records'); #.head(5)
     else: ###Detailed search by type
         parsed = parse_qs(str(params))
         filters = json.loads(parsed.get('filters', [''])[0])
@@ -290,12 +287,15 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         list_type= "official"
         addon=",list_url"
         multiplier = -1
+    if list_type=="official": private = "false as list_private"
+    else: private = "l.list_private"
     query = f'''SELECT 	
                     l.list_id*{multiplier} list_id
                     ,l.list_name
                     ,l.list_description
                     ,l.list_type
                     ,l.user_id
+                    ,{private}
                     ,u.user_name 
                     ,coalesce(lik.likes,0) likes
                     ,coalesce(dis.dislikes,0) dislikes

@@ -242,6 +242,13 @@ where coalesce("authorLabel",author_name) is not null
 ) a2
 where a2.author_q = a.author_q and a.author_q is not null;
 
+--Delete buggy data
+delete
+from authors
+where author_q ilike '%at %' or author_q ilike '%wd:Q%' or author_q ilike '%OPTIONAL %'
+or author_q ilike '%UNION%' or author_q ilike '%{%' or author_q ilike '%#%' or author_q ilike '%?%'
+or author_q not ilike '%http://www.wikidata.org/entity/%'
+
 --Insert authors that do not exist in the author table from wikireformat
 INSERT INTO AUTHORS (author_name,author_positions,author_name_language
 					 ,author_birth_date,author_birth_city
