@@ -9,8 +9,17 @@ from main_data import mainData, parseXML, returnLabel, profileViewData
 from sqlalchemy import text
 from urllib.parse import parse_qs
 import requests
+import uvicorn
+import os
 
 app = FastAPI()
+@app.get("/")
+def read_root():
+    return {"message": "Hello, world!"}
+
+if __name__ == "__main__":
+    uvicorn.run("API:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
 @app.get("/data")
 def data(response: Response, type = None, id:int = None, by = None, user_id:int = 0):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
@@ -654,3 +663,5 @@ async def update_user_data(response:Response, info:Request):
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
+
+
