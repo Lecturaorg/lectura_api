@@ -79,6 +79,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
 def data(response: Response, lang:str = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     query = f'''SELECT label_loc, label_value from labels where language = '{lang}' '''
+    print(query)
     labels = pd.read_sql(query,con=engine()).drop_duplicates()
     labels = dict(zip(labels['label_loc'], labels['label_value']))
     return labels
