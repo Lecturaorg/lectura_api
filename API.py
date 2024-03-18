@@ -76,13 +76,39 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     return results
 
 @app.get("/labels")
-def data(response: Response, lang:str = None):
+def labels(response: Response, lang:str = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     query = f'''SELECT label_loc, label_value from labels where language = '{lang}' '''
-    print(query)
     labels = pd.read_sql(query,con=engine()).drop_duplicates()
     labels = dict(zip(labels['label_loc'], labels['label_value']))
     return labels
+
+@app.post("/get_texts")
+async def createUser(response:Response,info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    response.headers['Content-Type'] = 'application/json'
+    reqInfo = await info.json()
+    authors = reqInfo["authors"]
+    authors = ", ".join([str(num) for num in authors])
+    query = f'''SET statement_timeout = 60000;
+                SELECT text_id
+                        ,text_title
+                        ,text_author
+                        ,author_id
+                        ,text_type
+                        ,text_language
+                        ,text_original_publication_date
+                        ,text_original_publication_year
+                        ,text_original_publication_month
+                        ,text_original_publication_day
+                        ,text_q
+                        ,text_author_q
+                        ,text_description
+                FROM texts t where t.author_id in ({authors})'''
+    texts = pd.read_sql(query,con=engine()).drop_duplicates()
+    response.body = texts.to_json(orient='records').encode("utf-8")
+    response.status_code = 200
+    return response
 
 @app.post("/delete_data")
 async def delete_data(response:Response,info:Request):
