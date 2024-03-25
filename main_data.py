@@ -97,6 +97,7 @@ def profileViewData(user_id):
                 ,replace(text_q, 'http://www.wikidata.org/entity/', '') text_q
                 ,text_title
                 ,author_id
+                ,check_date::date check_date
                 from checks c
                 left join texts t on t.text_id = c.text_id
                 where c.user_id = {user_id} '''

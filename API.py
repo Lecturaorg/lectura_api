@@ -193,7 +193,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                         END,
                         ')')
                     END,'')) AS label'''
-            elif searchtype == "texts": variables+=''',text_id as value,text_title || 
+            elif searchtype == "texts": variables+=''',split_part(author_id, ',', 1) AS author_id,text_id as value,text_title || 
                 case
                     when text_original_publication_year is null then ' - ' 
                     when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
@@ -214,6 +214,7 @@ def search(info: Request,response: Response, query, searchtype = None):
                 elif searchtype == "texts": 
                     filterString += "text_name::varchar(255) ILIKE '%" + query + "%'" + " OR \n text_author ILIKE '%" + query + "%'"
             query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString)
+            print(query)
             results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
             return results
         queryList = query.split(" ")
