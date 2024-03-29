@@ -75,6 +75,24 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     else: results = mainData()
     return results
 
+@app.post("/browse")
+async def browse(response:Response, info:Request):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    response.headers['Content-Type'] = 'application/json'
+    reqInfo = await info.json()
+    dataType = reqInfo["type"]
+    sort = reqInfo["sort"]["value"]
+    page = int(reqInfo["page"])
+    pageLength = int(reqInfo["pageLength"])
+    offset = (page-1)*pageLength
+    query = f'''SET statement_timeout = 60000;SELECT {returnLabel(dataType.replace("s",""))},* 
+                from {dataType} ORDER BY {sort} LIMIT {pageLength} OFFSET {offset} '''
+    result = pd.read_sql(query, con=engine()).drop_duplicates()
+    response.body = result.to_json(orient='records').encode("utf-8")
+    response.status_code = 200
+    #print(response.body)
+    return response
+
 @app.get("/labels")
 def labels(response: Response, lang:str = None):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
@@ -509,6 +527,7 @@ async def upload_comment(response:Response, info:Request):
     if parent_comment_id is None: parent_comment_id = "null"
     comment_type = reqInfo["type"]
     comment_type_id = reqInfo["type_id"]
+    if comment_type_id is None: comment_type_id = "null"
     query = '''INSERT INTO COMMENTS (user_id, comment_content, parent_comment_id, comment_type, comment_type_id) VALUES 
         (%s, '%s', %s, '%s', %s) ''' % (user_id, comment, parent_comment_id, comment_type, comment_type_id)
     conn = engine().connect()
