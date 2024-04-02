@@ -58,4 +58,5 @@ FROM (
         OR author_birth_city ILIKE %(query)s
         OR author_birth_country ILIKE %(query)s
         OR author_name_language ILIKE %(query)s
-) ag;
+) ag
+where label is not null;

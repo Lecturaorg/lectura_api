@@ -75,6 +75,39 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     else: results = mainData()
     return results
 
+def filter_options(filter_type):
+    author = ["author_positions", "author_name_language", 'author_birth_country', 'author_death_country', 'author_nationality']
+    text = ["text_type", "text_language"]
+    if filter_type == "authors": options = author
+    else: options = text
+    query_base = f"SET statement_timeout = 60000;SELECT DISTINCT unnest(string_to_array([col], ', ')) AS [col] FROM {filter_type} ORDER BY [col];"
+    filter_list = {}
+    for filt in options: filter_list[filt] = pd.read_sql(query_base.replace("[col]",filt), con=engine())[filt].to_list()
+    return filter_list
+
+@app.get("/filters")
+def filters(response: Response, filter_type:str):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    return filter_options(filter_type)
+
+def build_where_clauses(filters):
+    where_clauses = []
+    for column, selections in filters.items():
+        if selections:
+            column_clauses = []
+            for selection in selections:
+                # Construct the WHERE clause for each selection in the column
+                column_clause = f"{column} ILIKE '%{selection}%'"
+                column_clauses.append(column_clause)
+            # Join the clauses for each selection with OR
+            column_where = " OR ".join(column_clauses)
+            where_clauses.append(f"({column_where})")
+    # Join the WHERE clauses for each column with AND
+    where_query = " AND ".join(where_clauses)
+    if not where_query: return ""
+    else: where_query = 'WHERE ' + where_query
+    return where_query
+
 @app.post("/browse")
 async def browse(response:Response, info:Request):
     response.headers['Access-Control-Allow-Origin'] = "*"
@@ -84,10 +117,16 @@ async def browse(response:Response, info:Request):
     sort = reqInfo["sort"]["value"]
     page = int(reqInfo["page"])
     pageLength = int(reqInfo["pageLength"])
+    filters = reqInfo["selectedFilters"]
     offset = (page-1)*pageLength
+    if len(filters.keys()) == 0: where = ''
+    else:
+        where = build_where_clauses(filters)
+        print(build_where_clauses(filters))
     query = f'''SET statement_timeout = 60000;SELECT {returnLabel(dataType.replace("s",""))},* 
-                from {dataType} ORDER BY {sort} LIMIT {pageLength} OFFSET {offset} '''
-    result = pd.read_sql(query, con=engine()).drop_duplicates()
+                from {dataType} {where} ORDER BY {sort} LIMIT {pageLength} OFFSET {offset} '''
+    print(query)
+    result = pd.read_sql(text(query), con=engine())
     response.body = result.to_json(orient='records').encode("utf-8")
     response.status_code = 200
     #print(response.body)
