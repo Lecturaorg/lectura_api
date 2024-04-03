@@ -76,7 +76,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     return results
 
 def filter_options(filter_type):
-    author = ["author_positions", "author_name_language", 'author_birth_country', 'author_death_country', 'author_nationality']
+    author = ["author_positions", "author_name_language", 'author_birth_country', 'author_death_country', 'author_nationality', 'author_birth_city', 'author_death_city']
     text = ["text_type", "text_language"]
     if filter_type == "authors": options = author
     else: options = text
@@ -120,16 +120,15 @@ async def browse(response:Response, info:Request):
     filters = reqInfo["selectedFilters"]
     offset = (page-1)*pageLength
     if len(filters.keys()) == 0: where = ''
-    else:
-        where = build_where_clauses(filters)
-        print(build_where_clauses(filters))
+    else: where = build_where_clauses(filters)
     query = f'''SET statement_timeout = 60000;SELECT {returnLabel(dataType.replace("s",""))},* 
                 from {dataType} {where} ORDER BY {sort} LIMIT {pageLength} OFFSET {offset} '''
-    print(query)
-    result = pd.read_sql(text(query), con=engine())
-    response.body = result.to_json(orient='records').encode("utf-8")
+    length_query = f'''SET statement_timeout = 60000; SELECT COUNT(*) result_length from {dataType} {where}'''
+    result = pd.read_sql(text(query), con=engine()).to_json(orient='records')
+    result_length = pd.read_sql(text(length_query), con=engine()).iloc[0, 0]
+    body = {"result": json.loads(result), "result_length": int(result_length)}
+    response.body = json.dumps(body).encode("utf-8")
     response.status_code = 200
-    #print(response.body)
     return response
 
 @app.get("/labels")
