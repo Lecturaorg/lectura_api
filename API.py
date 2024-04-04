@@ -90,22 +90,35 @@ def filters(response: Response, filter_type:str):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     return filter_options(filter_type)
 
+def create_range_where_clause(column, range_dict):
+    min_value = range_dict.get('min')
+    max_value = range_dict.get('max')
+    if min_value != '' and max_value != '' and min_value is not None and max_value is not None:
+        where_clause = f"{column} >= {min_value} AND {column} <= {max_value}"
+    elif min_value is not None and min_value != '': where_clause = f"{column} >= {min_value}"
+    elif max_value is not None and max_value != '': where_clause = f"{column} <= {max_value}"
+    else: where_clause = ""
+    return where_clause
+
 def build_where_clauses(filters):
+    print(filters)
     where_clauses = []
     for column, selections in filters.items():
-        if selections:
+        if selections and isinstance(selections, list):
             column_clauses = []
             for selection in selections:
-                # Construct the WHERE clause for each selection in the column
                 column_clause = f"{column} ILIKE '%{selection}%'"
                 column_clauses.append(column_clause)
-            # Join the clauses for each selection with OR
             column_where = " OR ".join(column_clauses)
             where_clauses.append(f"({column_where})")
+        elif selections and isinstance(selections, dict): 
+            range_clause = create_range_where_clause(column,selections)
+            if range_clause != "": where_clauses.append(range_clause)
     # Join the WHERE clauses for each column with AND
     where_query = " AND ".join(where_clauses)
     if not where_query: return ""
     else: where_query = 'WHERE ' + where_query
+    print(where_query)
     return where_query
 
 @app.post("/browse")
@@ -115,6 +128,7 @@ async def browse(response:Response, info:Request):
     reqInfo = await info.json()
     dataType = reqInfo["type"]
     sort = reqInfo["sort"]["value"]
+    sortOrder = reqInfo["sort"]["order"]
     page = int(reqInfo["page"])
     pageLength = int(reqInfo["pageLength"])
     filters = reqInfo["selectedFilters"]
@@ -122,7 +136,7 @@ async def browse(response:Response, info:Request):
     if len(filters.keys()) == 0: where = ''
     else: where = build_where_clauses(filters)
     query = f'''SET statement_timeout = 60000;SELECT {returnLabel(dataType.replace("s",""))},* 
-                from {dataType} {where} ORDER BY {sort} LIMIT {pageLength} OFFSET {offset} '''
+                from {dataType} {where} ORDER BY {sort} {sortOrder} LIMIT {pageLength} OFFSET {offset} '''
     length_query = f'''SET statement_timeout = 60000; SELECT COUNT(*) result_length from {dataType} {where}'''
     result = pd.read_sql(text(query), con=engine()).to_json(orient='records')
     result_length = pd.read_sql(text(length_query), con=engine()).iloc[0, 0]
