@@ -135,8 +135,14 @@ async def browse(response:Response, info:Request):
     offset = (page-1)*pageLength
     if len(filters.keys()) == 0: where = ''
     else: where = build_where_clauses(filters)
-    query = f'''SET statement_timeout = 60000;SELECT {returnLabel(dataType.replace("s",""))},* 
-                from {dataType} {where} ORDER BY {sort} {sortOrder} LIMIT {pageLength} OFFSET {offset} '''
+    if dataType=="authors":
+        count = ", coalesce(c.book_cnt,0) book_cnt"
+        countJoin = "left join author_bookcount c on d.author_id = c.author_id"
+    else: 
+        count = ""
+        countJoin = ""
+    query = f'''SET statement_timeout = 60000;select * from (SELECT {returnLabel(dataType.replace("s",""))}, d.* {count}
+                from {dataType} d {countJoin} {where}) aag ORDER BY {sort} {sortOrder} LIMIT {pageLength} OFFSET {offset} '''
     length_query = f'''SET statement_timeout = 60000; SELECT COUNT(*) result_length from {dataType} {where}'''
     result = pd.read_sql(text(query), con=engine()).to_json(orient='records')
     result_length = pd.read_sql(text(length_query), con=engine()).iloc[0, 0]
