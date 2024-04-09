@@ -608,8 +608,10 @@ async def update_comment(response:Response, info:Request):
     delete = reqInfo["delete"]
     conn = engine().connect()
     if delete:
-        conn.execute(f"UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = {comment_id}") 
-    else: conn.execute(f"UPDATE COMMENTS SET COMMENT_CONTENT = '{comment}', COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = {comment_id}")
+        conn.execute(f'''UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = {comment_id}''') 
+    else:
+        new_content = '''UPDATE COMMENTS SET COMMENT_CONTENT = %s, COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = %s'''
+        conn.execute(new_content, (comment, comment_id))
     conn.close()
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
@@ -641,9 +643,10 @@ def comments(response:Response, comment_type, comment_type_id, user_id:int=None)
                     left join (select comment_id, max(comment_rating_type) comment_rating_type 
 				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
         WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}
-        ORDER BY comment_deleted desc '''
+        ORDER BY comment_created_at desc '''
     if comment_type == "text": 
         query = query.replace("LEFT JOIN (", "LEFT JOIN TEXTS t on t.text_id = c.comment_type_id \n LEFT JOIN (").replace(",U.USER_NAME",",t.author_id \n ,U.USER_NAME")
+    if comment_type_id == 'null': query = query.replace("COMMENT_TYPE_ID = null", "COMMENT_TYPE_ID is null")
     comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
     def create_comment_tree(comments, parent_id=None):
         tree = []
