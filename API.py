@@ -400,15 +400,15 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         list_type= "official"
         addon=",list_url"
         multiplier = -1
-    if list_type=="official": private = "false as list_private"
-    else: private = "l.list_private"
+    if list_type=="official": private = ",false as list_private\n,false as list_deleted"
+    else: private = ",l.list_private\n,list_deleted"
     query = f'''SELECT 	
                     l.list_id*{multiplier} list_id
                     ,l.list_name
                     ,l.list_description
                     ,l.list_type
                     ,l.user_id
-                    ,{private}
+                    {private}
                     ,u.user_name 
                     ,coalesce(lik.likes,0) likes
                     ,coalesce(dis.dislikes,0) dislikes
@@ -484,7 +484,8 @@ def postUpdates(changes,list_id):
     additions = changes["additions"]
     removals = changes["removals"]
     order_changes = changes["order_changes"]
-    delete = changes["delete"]
+    if "delete" in changes.keys(): delete = changes["delete"]
+    else: delete = None
     conn = engine().connect()
     if len(additions)>0:
         for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
@@ -496,7 +497,7 @@ def postUpdates(changes,list_id):
     if not list_info is False and len(list_info.keys())>1:
         for element in list_info.keys():
             if element not in ["hash", "user_id"]:
-                conn.execute(f"UPDATE USER_LISTS SET {element} = '{list_info[element]}' WHERE LIST_ID = {list_id}")
+                conn.execute(f"UPDATE USER_LISTS SET {element} = %s WHERE LIST_ID = %s",(list_info[element], list_id))
     if delete: conn.execute(f"UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = {list_id}")
     conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED = CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
     conn.close()
@@ -607,8 +608,8 @@ async def update_comment(response:Response, info:Request):
     comment = reqInfo["comment"]
     delete = reqInfo["delete"]
     conn = engine().connect()
-    if delete:
-        conn.execute(f'''UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = true WHERE COMMENT_ID = {comment_id}''') 
+    if delete or delete is False:
+        conn.execute(f'''UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = {delete} WHERE COMMENT_ID = {comment_id}''') 
     else:
         new_content = '''UPDATE COMMENTS SET COMMENT_CONTENT = %s, COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = %s'''
         conn.execute(new_content, (comment, comment_id))
@@ -701,6 +702,28 @@ async def element_interaction(response:Response, info:Request):
     response.status_code = 200
     response.body = json.dumps(reqInfo).encode('utf-8')
     return response
+
+@app.get("/get_interactions")
+def get_interactions(response:Response, type:str, id:int, detailed:bool=None):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    if detailed:
+        if type in ["checks", "watch", "favorites","dislikes"]: element_type = "text"
+        elif type in ["user_lists_likes", "user_lists_dislikes","user_lists_watchlists"]: element_type = "list"
+        else: element_type = "author"
+        query = f'''SELECT distinct user_name FROM {type} e
+                    LEFT JOIN USERS U on U.USER_ID = e.USER_ID
+                    WHERE e.{element_type}_ID = {id}
+                    '''
+        return pd_dict(query)
+    else:
+        if type=="text": 
+            query = f'''SELECT 
+                    (SELECT COUNT(*) FROM checks WHERE text_id = {id}) AS checks,
+                    (SELECT COUNT(*) FROM watch WHERE text_id = {id}) AS watch,
+                    (SELECT COUNT(*) FROM favorites WHERE text_id = {id}) AS favorites,
+                    (SELECT COUNT(*) FROM dislikes WHERE text_id = {id}) AS dislikes
+                        '''
+            return pd.read_sql(text(query), con=engine()).iloc[0].to_dict()
 
 @app.get("/source_data")
 def source_data(response:Response, author:str, title:str,label:str, type:str):
