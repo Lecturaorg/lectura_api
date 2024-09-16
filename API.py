@@ -448,6 +448,55 @@ def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=Non
         data = {"list_info": list_info, "list_detail": list_elements}
         return data
 
+@app.get("/get_user_updates")
+def get_user_updates(response:Response, user_id:str=None, length:int=None):
+    response.headers['Access-Control-Allow-Origin'] = "*"
+    if length == 'null': list_len = 10
+    else: list_len = length
+    if user_id == 'null': user = 'w.user_id is not null'
+    else: user = 'w.user_id = ' + user_id
+    query = f'''
+        select coalesce(w.author_id::varchar(255),t.author_id::varchar(255)) as author_id
+        ,w.text_id::varchar
+        ,t.text_title
+        ,a.author_name
+        ,w.user_id::varchar
+        ,u.user_name
+        ,w.up_date
+        ,CONCAT(
+        CASE WHEN EXTRACT(DAY FROM AGE(NOW(), up_date))>0 THEN CONCAT(EXTRACT(DAY FROM AGE(NOW(), up_date)), ' days ') ELSE '' END, 
+        EXTRACT(HOUR FROM AGE(NOW(), up_date)), ' hours ago'
+        ) date_diff
+        ,w.type
+        from
+        ((select null as author_id,w.text_id, w.user_id, watch_date as up_date, 'watchlisted' as type
+        from watch w
+        order by watch_date desc
+        LIMIT {list_len})
+        UNION all
+        (select author_id, null as text_id, user_id, watch_date as up_date, 'watchlisted' as type
+        from author_watch
+        order by watch_date desc
+        LIMIT {list_len})
+        UNION ALL
+        (select null as author_id, text_id, user_id, interaction_date as upd_date, 'favorited' as type 
+        from favorites
+        order by interaction_date desc
+        limit {list_len})
+        UNION ALL
+        (select null as author_id, text_id, user_id, interaction_date as upd_date, 'disliked' as type 
+        from dislikes
+        order by interaction_date desc limit {list_len})) as w
+        left join texts t on t.text_id = w.text_id
+        left join authors a on a.author_id = w.author_id
+        left join users u on u.user_id = w.user_id
+        where {user}
+        order by up_date desc
+        LIMIT {list_len};
+        '''
+    df = pd.read_sql(query, con=engine()).to_dict('records')
+    return df
+
 @app.get("/get_element_user_lists")
 def get_element_user_lists(response:Response, list_type:str, type_id:int,user_id:int=None, hash:str=None):
     response.headers['Access-Control-Allow-Origin'] = "*"
