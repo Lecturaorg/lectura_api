@@ -1,16 +1,10 @@
 from fastapi import FastAPI, Response, Request
-import json
-from sql_funcs import engine, read_sql, validateUser, pd_dict
+from sql_funcs import engine, read_sql
 import pandas as pd
-import numpy as np
-import secrets
-import hashlib
-from main_data import mainData, parseXML, returnLabel, profileViewData
-from sqlalchemy import text
-from urllib.parse import parse_qs
-import requests
+from main_data import returnLabel
 import uvicorn
 import os
+from sub_APIs import update_user, page_data, browse_func, official_lists, search_func, list_funcs, comment_funcs, externals
 
 app = FastAPI()
 @app.get("/")
@@ -22,826 +16,161 @@ if __name__ == "__main__":
 
 @app.get("/data")
 def data(response: Response, type = None, id:int = None, by = None, user_id:int = 0):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    if (type != None and id != None):
-        if type == 'authors':
-            query = f'''select a.*, case when watch=1 then true else false end as author_watch
-                        from authors a 
-                        left join (select count(*) watch, author_id from author_watch where user_id = {user_id} group by author_id) aw on aw.author_id = a.author_id 
-                        where a.author_id = '{str(id)}'
-                        '''
-            author = pd_dict(query)[0]
-            return author
-        if type == 'texts':
-            if by == "author":
-                query = f'''SET statement_timeout = 60000; 
-                            select t.text_id
-                                ,text_title as "titleLabel"
-                                ,text_author
-                                ,text_q
-                                ,replace(a.author_q, 'http://www.wikidata.org/entity/','') as author_q
-                                ,text_title || 
-                                case
-                                    when text_original_publication_year is null then ' ' 
-                                    when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') '
-                                    else ' (' || text_original_publication_year || ' AD' || ') '
-                                end as "bookLabel"
-                                ,case when c.text_id is not null then true else false end as checks
-                                ,case when w.text_id is not null then true else false end as watch
-                                ,case when f.text_id is not null then true else false end as favorites
-                                ,case when d.text_id is not null then true else false end as dislikes
-                            from texts t
-                            left join authors a on a.author_id::integer = t.author_id::integer
-                            left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
-                            left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
-                            left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
-                            left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
-                            where t.author_id = '{str(id)}' '''
-                texts = pd_dict(query)
-            else:
-                query = f'''select t.*
-                            ,case when c.text_id is not null then true else false end as checks
-                            ,case when w.text_id is not null then true else false end as watch
-                            ,case when f.text_id is not null then true else false end as favorites
-                            ,case when d.text_id is not null then true else false end as dislikes
-                            from texts t
-                            left join (select distinct text_id from checks where user_id = {user_id}) c on c.text_id = t.text_id
-                            left join (select distinct text_id from watch where user_id = {user_id}) w on w.text_id = t.text_id
-                            left join (select distinct text_id from favorites where user_id = {user_id}) f on f.text_id = t.text_id
-                            left join (select distinct text_id from dislikes where user_id = {user_id}) d on d.text_id = t.text_id
-                            where t.text_id = '{str(id)}' '''
-                texts = pd_dict(query)[0]#.to_json(orient="table")
-            return texts
-    else: results = mainData()
-    return results
-
-def filter_options(filter_type):
-    author = ["author_positions", "author_name_language", 'author_birth_country', 'author_death_country', 'author_nationality', 'author_birth_city', 'author_death_city']
-    text = ["text_type", "text_language"]
-    if filter_type == "authors": options = author
-    else: options = text
-    query_base = f"SET statement_timeout = 60000;SELECT DISTINCT unnest(string_to_array([col], ', ')) AS [col] FROM {filter_type} ORDER BY [col];"
-    filter_list = {}
-    for filt in options: filter_list[filt] = pd.read_sql(query_base.replace("[col]",filt), con=engine())[filt].to_list()
-    return filter_list
-
-@app.get("/filters")
-def filters(response: Response, filter_type:str):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    return filter_options(filter_type)
-
-def create_range_where_clause(column, range_dict):
-    min_value = range_dict.get('min')
-    max_value = range_dict.get('max')
-    if min_value != '' and max_value != '' and min_value is not None and max_value is not None:
-        where_clause = f"{column} >= {min_value} AND {column} <= {max_value}"
-    elif min_value is not None and min_value != '': where_clause = f"{column} >= {min_value}"
-    elif max_value is not None and max_value != '': where_clause = f"{column} <= {max_value}"
-    else: where_clause = ""
-    return where_clause
-
-def build_where_clauses(filters):
-    print(filters)
-    where_clauses = []
-    for column, selections in filters.items():
-        if selections and isinstance(selections, list):
-            column_clauses = []
-            for selection in selections:
-                column_clause = f"{column} ILIKE '%{selection}%'"
-                column_clauses.append(column_clause)
-            column_where = " OR ".join(column_clauses)
-            where_clauses.append(f"({column_where})")
-        elif selections and isinstance(selections, dict): 
-            range_clause = create_range_where_clause(column,selections)
-            if range_clause != "": where_clauses.append(range_clause)
-    # Join the WHERE clauses for each column with AND
-    where_query = " AND ".join(where_clauses)
-    if not where_query: return ""
-    else: where_query = 'WHERE ' + where_query
-    print(where_query)
-    return where_query
+    '''Extracts data for a particular author and/or text page:
+        @type: 'authors' or 'texts'
+        @id: id of author or text
+        @by: none if specific author or text data, when 'author' it extracts all texts for a particular author id
+        @user_id: user_id if a user is online, extracts interaction data
+    '''
+    return page_data.page_data(type, id, by, user_id)
 
 @app.post("/browse")
 async def browse(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    response.headers['Content-Type'] = 'application/json'
-    reqInfo = await info.json()
-    dataType = reqInfo["type"]
-    sort = reqInfo["sort"]["value"]
-    sortOrder = reqInfo["sort"]["order"]
-    page = int(reqInfo["page"])
-    pageLength = int(reqInfo["pageLength"])
-    filters = reqInfo["selectedFilters"]
-    offset = (page-1)*pageLength
-    if len(filters.keys()) == 0: where = ''
-    else: where = build_where_clauses(filters)
-    if dataType=="authors":
-        count = ", coalesce(c.book_cnt,0) book_cnt"
-        countJoin = "left join author_bookcount c on d.author_id = c.author_id"
-    else: 
-        count = ""
-        countJoin = ""
-    query = f'''SET statement_timeout = 60000;select * from (SELECT {returnLabel(dataType.replace("s",""))}, d.* {count}
-                from {dataType} d {countJoin} {where}) aag ORDER BY {sort} {sortOrder} LIMIT {pageLength} OFFSET {offset} '''
-    length_query = f'''SET statement_timeout = 60000; SELECT COUNT(*) result_length from {dataType} {where}'''
-    result = pd.read_sql(text(query), con=engine()).to_json(orient='records')
-    result_length = pd.read_sql(text(length_query), con=engine()).iloc[0, 0]
-    body = {"result": json.loads(result), "result_length": int(result_length)}
-    response.body = json.dumps(body).encode("utf-8")
-    response.status_code = 200
-    return response
+    '''Provides data for the browsing page'''
+    return await browse_func.browse_func(response, info)
+
+@app.get("/filters")
+def filters(response: Response, filter_type:str):
+    '''Builds filter options for the browsing page'''
+    return browse_func.filters_func(response, filter_type)
 
 @app.get("/labels")
 def labels(response: Response, lang:str = None):
+    '''Extracts page labels depending on browser language/selected option by user'''
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    query = f'''SELECT label_loc, label_value from labels where language = '{lang}' '''
+    query = f'''SELECT label_loc, label_value from labels where language = 'en' '''
+#    query = f'''SELECT label_loc, label_value from labels where language = '{lang}' ''' #Change back later possibly..
     labels = pd.read_sql(query,con=engine()).drop_duplicates()
     labels = dict(zip(labels['label_loc'], labels['label_value']))
     return labels
 
 @app.post("/get_texts")
-async def createUser(response:Response,info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    response.headers['Content-Type'] = 'application/json'
-    reqInfo = await info.json()
-    authors = reqInfo["authors"]
-    authors = ", ".join([str(num) for num in authors])
-    query = f'''SET statement_timeout = 60000;
-                SELECT text_id
-                        ,text_title
-                        ,text_author
-                        ,author_id
-                        ,text_type
-                        ,text_language
-                        ,text_original_publication_date
-                        ,text_original_publication_year
-                        ,text_original_publication_month
-                        ,text_original_publication_day
-                        ,text_q
-                        ,text_author_q
-                        ,text_description
-                FROM texts t where t.author_id in ({authors})'''
-    texts = pd.read_sql(query,con=engine()).drop_duplicates()
-    response.body = texts.to_json(orient='records').encode("utf-8")
-    response.status_code = 200
-    return response
+async def get_texts(response:Response,info:Request):
+    '''Gets text data for a particular author IDs'''
+    return await page_data.texts_data(response, info)
 
 @app.post("/delete_data")
 async def delete_data(response:Response,info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    reqInfo = await info.json()
-    data_type = reqInfo["type"]
-    if data_type not in ["text", "author"]: return False
-    id = reqInfo["id"]
-    if reqInfo["deleted"] == True: deleted = False
-    else: deleted = True
-    if validateUser(reqInfo["user_id"], reqInfo["hash"]):
-        query = f'''UPDATE {data_type}s SET {data_type}_deleted = {deleted} WHERE {data_type}_id = {id} '''
-        conn = engine().connect()
-        conn.execute(query)
-        response.body = json.dumps(reqInfo).encode("utf-8")
-        response.status_code = 200
-        conn.close()
-
+    '''Deletes data for a page (i.e. author or text) if admin'''
+    return await page_data.delete_data_func(response, info)
 
 @app.get("/official_lists")
 def extract_list(response:Response, language=None, country=None, query_type=None):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    queries = {'num_books':"/Users/tarjeisandsnes/lectura_api/API_queries/texts_by_author.sql",
-                'no_books':"/Users/tarjeisandsnes/lectura_api/API_queries/authors_without_text.sql"}
-    query = read_sql(queries[query_type])
-    if language=="All": language=""
-    if country=="All": query = query.replace("a.author_nationality ilike '%[country]%' and ", "")
-    query = query.replace("[country]", country.replace("'","''")).replace("[language]",language.replace("'","''"))
-    results = pd.read_sql(text(query), con=engine())
-    if query_type=="num_books": results = results.sort_values(by=["texts"],ascending=False)
-    results = results.replace(np.nan, None).to_dict('records')
-    return results
+    '''Extracts data for official lists, i.e. lists generated automatically by the system based on pre-defined criterias:
+        - Number of texts by author
+        - Authors without registered texts
+    '''
+    return official_lists.official_lists(response, language, country, query_type)
 
 @app.get("/search")
 def search(info: Request,response: Response, query, searchtype = None):
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    params = info.query_params
-    query = query.replace("'","''").strip()
-    search_params = {"query": f"%{query}%"}
-    if searchtype == None:
-        allQuery = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/search_all.sql")
-        queryList = query.split(' ')
-        if len(queryList) == 1:
-            results = pd.read_sql(allQuery,con=engine(),params=search_params).drop_duplicates().to_dict("records")
-            return results
-        else:
-            results = None
-            for subQuery in queryList:
-                search_params["query"]=f"%{subQuery}%"
-                sub_results = pd.read_sql(allQuery, con=engine(), params=search_params)
-                results = sub_results if results is None else pd.merge(results, sub_results, how="inner")
-            return results.to_dict('records'); #.head(5)
-    else: ###Detailed search by type
-        parsed = parse_qs(str(params))
-        filters = json.loads(parsed.get('filters', [''])[0])
-        def find_results(query):
-            queryBase = f'''SET statement_timeout = 60000;
-                select  * from {searchtype} WHERE  '''
-            variables = searchtype.replace("s","")+"_id"
-            if searchtype == "authors": variables+= ''',author_id as value,CONCAT(
-                SPLIT_PART(author_name, ', ', 1),
-                COALESCE(
-                    CASE
-                    WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
-                    WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
-                    WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
-                            CASE 
-                                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-                            END,
-                        ')')
-                    WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
-                        CASE
-                            WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
-                            ELSE concat(author_birth_year::VARCHAR, ' AD')
-                        END,
-                        ')')
-                    ELSE CONCAT(' (', ABS(author_birth_year), '-',
-                        CASE 
-                            WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
-                            ELSE CONCAT(author_death_year::VARCHAR, ' AD')
-                        END,
-                        ')')
-                    END,'')) AS label'''
-            elif searchtype == "texts": variables+=''',split_part(author_id, ',', 1) AS author_id,text_id as value,text_title || 
-                case
-                    when text_original_publication_year is null then ' - ' 
-                    when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
-                    else ' (' || text_original_publication_year || ' AD' || ') - '
-                end
-                || coalesce(text_author,'Unknown')
-                as label'''
-            filterString = ""            
-            if len(filters)>0:
-                for n in range(len(filters)): #varlist should be a body in API request and optional
-                    var = filters[n]
-                    if var["value"]=="label": continue
-                    variables += ","+ var["value"] + '''::varchar(255) "''' + var["value"] + '''" \n''' #Add every search variable
-                    if n == len(filters)-1: filterString+= var["value"] + "::varchar(255) ILIKE '%" + query + "%'"
-                    else: filterString += var["value"] + "::varchar(255) ILIKE '%" + query + "%'" + " OR \n"
-            else:
-                if searchtype == "authors": filterString += "author_name::varchar(255) ILIKE '%" + query + "%'"
-                elif searchtype == "texts": 
-                    filterString += "text_name::varchar(255) ILIKE '%" + query + "%'" + " OR \n text_author ILIKE '%" + query + "%'"
-            query = queryBase.replace("*", variables).replace("WHERE ","WHERE " + filterString)
-            print(query)
-            results = pd.read_sql(text(query), con=engine()).drop_duplicates()#.to_dict('records')
-            return results
-        queryList = query.split(" ")
-        if len(queryList) == 1: results = find_results(queryList[0]).to_dict('records')
-        else:
-            results = False
-            for subQuery in queryList:
-                if isinstance(results, pd.DataFrame):
-                    newResults = find_results(subQuery)
-                    results = pd.merge(results, newResults, how="inner").drop_duplicates()
-                else: results = find_results(subQuery)
-            results = results.to_dict('records')
-        return results
+    '''Finds authors and/or texts matching the query and searchtype
+        @query: search string
+        @searchtype: authors/texts
+    '''
+    return search_func.search_func(info, response, query, searchtype)
 
 @app.post("/create_user")
-async def createUser(response:Response,info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    response.headers['Content-Type'] = 'application/json'
-    reqInfo = await info.json()
-    email = reqInfo["user_email"].lower()
-    username = reqInfo["user_name"].lower()
-    conn = engine().connect()
-    query = f"SELECT user_id FROM users WHERE user_email = '{email}' or user_name = '{username}'"
-    df = pd.read_sql_query(query, conn)
-    if not df.empty: 
-        response.body = json.dumps({"message": "Duplicate"}).encode("utf-8")
-        response.status_code = 200
-    else:
-        hashedPassword = reqInfo["user_password"]
-        conn.execute("INSERT INTO USERS (user_name, user_email, hashed_password, user_role) VALUES (%s, %s, %s, %s)", (username, email, hashedPassword, 'basic'))
-        response.body = json.dumps(profileViewData(pd.read_sql(query, conn).to_dict("records")[0]["user_id"])).encode("utf-8")
-        response.status_code = 200
-        conn.close()
-    return response
+async def create_user(response:Response,info:Request):
+    '''Creates a new user and inserts new profile into the database'''
+    return await update_user.create_user_func(response,info)
 
 @app.get("/login_user")
 def login(response:Response,request:Request, user):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if "@" in user: login_col = "user_email"
-    else: login_col = "user_name"
-    query = "SELECT user_id, user_name,user_role, user_email, hashed_password from USERS where %s = '%s'" % (login_col, user)
-    conn = engine().connect()
-    df = pd.read_sql_query(query, conn)
-    if df.empty: return False
-    else:
-        random_number = str(secrets.randbits(32))
-        user_ip = request.client.host
-        user_agent = request.headers.get('User-Agent')
-        data = user_ip+user_agent+random_number
-        hashed_data = hashlib.sha256(data.encode()).hexdigest()
-        df = df.to_dict('records')[0]
-        sessionQuery = f'''DELETE FROM USER_SESSIONS WHERE USER_ID = {df["user_id"]};
-                        INSERT INTO USER_SESSIONS (HASH, USER_ID) VALUES ('{hashed_data}', {df["user_id"]})'''
-        conn.execute(sessionQuery)
-        return {"pw":df["hashed_password"].tobytes().decode('utf-8'),"hash":hashed_data
-                ,"user_id":df["user_id"],"user_name":df["user_name"],"user_email":df["user_email"], "user_role":df["user_role"]}
+    '''Logs in user and adds a hashed session ID in the database'''
+    return update_user.login_func(response, request, user)
 
 @app.post("/delete_user")
 async def delete_user(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    response.headers['Content-Type'] = 'application/json'
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): return
-    user_name = reqInfo["user_name"]
-    user_id = reqInfo["user_id"]
-    conn = engine().connect()
-    conn.execute(f'''DELETE FROM DELETED_USERS WHERE USER_NAME = '{user_name}' and USER_ID = '{user_id}';
-                    INSERT INTO DELETED_USERS (user_id, user_name, user_email, user_role, user_created, hashed_password) SELECT * FROM USERS WHERE USER_NAME = '{user_name}' AND USER_ID = '{user_id}';
-                    DELETE FROM USER_SESSIONS WHERE USER_ID = '{user_id}';
-                    DELETE FROM USERS WHERE USER_NAME = '{user_name}' and USER_ID = '{user_id}'; ''')
-    conn.close()
+    '''Deletes user and user session'''
+    return update_user.delete_user_func(response, info)
 
 @app.post("/create_list")
-async def createList(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    print(reqInfo)
-    params = reqInfo["list_info"]
-    user_id = params["user_id"]
-    hash = params["hash"]
-    if not validateUser(user_id, hash): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    list_name = params["list_name"]
-    list_descr = params["list_description"]
-    list_type = params["list_type"]
-    conn = engine().connect()
-    checkIfExists = f"SELECT list_id from USER_LISTS where list_name = '{list_name}'"
-    if pd.read_sql(checkIfExists, conn).empty:
-        conn.execute(f"INSERT INTO USER_LISTS (user_id, list_name, list_description, list_type) VALUES ({user_id}, '{list_name}', '{list_descr}', '{list_type}')")
-        list_id = pd.read_sql(f"SELECT list_id FROM USER_LISTS where list_name = '{list_name}'", conn).to_dict("records")[0]["list_id"]
-        postUpdates(reqInfo,list_id)
-        conn.close()
-        response.body = json.dumps({"list_id":list_id}).encode("utf-8")
-        response.status_code = 200
-        return response
+async def create_list(response:Response, info:Request):
+    '''Creates a new list by type, list name, description, etc'''
+    return await list_funcs.create_list_func(response, info)
 
 @app.get("/get_user_list")
 def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if list_id>0: 
-        list_type = "user"
-        addon=""
-        multiplier = 1
-    else: 
-        list_type= "official"
-        addon=",list_url"
-        multiplier = -1
-    if list_type=="official": private = ",false as list_private\n,false as list_deleted"
-    else: private = ",l.list_private\n,list_deleted"
-    query = f'''SELECT 	
-                    l.list_id*{multiplier} list_id
-                    ,l.list_name
-                    ,l.list_description
-                    ,l.list_type
-                    ,l.user_id
-                    {private}
-                    ,u.user_name 
-                    ,coalesce(lik.likes,0) likes
-                    ,coalesce(dis.dislikes,0) dislikes
-                    ,coalesce(watch.watchlists,0) watchlists
-                    {addon}
-                FROM {list_type}_LISTS L 
-                left join USERS u on u.user_id=l.user_id
-                left join (select count(*) likes, list_id from user_lists_likes group by list_id) lik on lik.list_id = L.list_id*{multiplier}
-                left join (select count(*) dislikes, list_id from user_lists_dislikes group by list_id) dis on dis.list_id = L.list_id*{multiplier}
-                left join (select count(*) watchlists, list_id from user_lists_watchlists group by list_id) watch on watch.list_id = L.list_id*{multiplier}
-                WHERE L.LIST_ID = {abs(list_id)}'''
-    lists = pd.read_sql(query, con=engine())
-    if validateUser(user_id, hash):
-        interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
-            ,CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
-            ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
-            ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
-            from USER_LISTS_WATCHLISTS W 
-            FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
-            FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-            WHERE W.USER_ID = '{str(user_id)}' OR L.USER_ID = '{str(user_id)}' OR DL.USER_ID = '{str(user_id)}' '''
-        list_interactions = pd.read_sql(interaction_query, con=engine())
-        if list_interactions.empty: lists = lists
-        else: lists = pd.merge(lists, list_interactions, how="left",on="list_id").fillna('')
-    if user_id is None: user_id = 'null'
-    else: user_id = user_id
-    if lists.empty: return False
-    else: 
-        list_info = lists.to_dict('records')[0]
-        if list_info["list_type"] == "authors": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_authors.sql")
-        elif list_info["list_type"] == "texts": detail_query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_elements_texts.sql")
-        else: detail_query = f'SELECT * FROM USER_LISTS_ELEMENTS WHERE LIST_ID = {list_id}'
-        detail_query = detail_query.replace('[$user_id]',str(user_id))
-        list_elements = pd.read_sql(detail_query.replace("[@list_id]",str(list_id)), con=engine())
-        if not list_elements.empty: list_elements = list_elements.fillna('').to_dict('records')
-        else: list_elements = []
-        data = {"list_info": list_info, "list_detail": list_elements}
-        return data
+    '''Gets data for a particular user list, user interactions if user id matches user list with the right hashing'''
+    return list_funcs.get_user_list_func(response, list_id, user_id, hash)
 
 @app.get("/get_user_updates")
-def get_user_updates(response:Response, user_id:str=None, length:int=None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if length == 'null': list_len = 10
-    else: list_len = length
-    if user_id == 'null': user = 'w.user_id is not null'
-    else: user = 'w.user_id = ' + user_id
-    query = f'''
-        select coalesce(w.author_id::varchar(255),t.author_id::varchar(255)) as author_id
-        ,w.text_id::varchar
-        ,t.text_title
-        ,a.author_name
-        ,w.user_id::varchar
-        ,u.user_name
-        ,w.up_date
-        ,CONCAT(
-        CASE WHEN EXTRACT(DAY FROM AGE(NOW(), up_date))>0 THEN CONCAT(EXTRACT(DAY FROM AGE(NOW(), up_date)), ' days ') ELSE '' END, 
-        EXTRACT(HOUR FROM AGE(NOW(), up_date)), ' hours ago'
-        ) date_diff
-        ,w.type
-        from
-        ((select null as author_id,w.text_id, w.user_id, watch_date as up_date, 'watchlisted' as type
-        from watch w
-        order by watch_date desc
-        LIMIT {list_len})
-        UNION all
-        (select author_id, null as text_id, user_id, watch_date as up_date, 'watchlisted' as type
-        from author_watch
-        order by watch_date desc
-        LIMIT {list_len})
-        UNION ALL
-        (select null as author_id, text_id, user_id, interaction_date as upd_date, 'favorited' as type 
-        from favorites
-        order by interaction_date desc
-        limit {list_len})
-        UNION ALL
-        (select null as author_id, text_id, user_id, interaction_date as upd_date, 'disliked' as type 
-        from dislikes
-        order by interaction_date desc limit {list_len})) as w
-        left join texts t on t.text_id = w.text_id
-        left join authors a on a.author_id = w.author_id
-        left join users u on u.user_id = w.user_id
-        where {user}
-        order by up_date desc
-        LIMIT {list_len};
-        '''
-    df = pd.read_sql(query, con=engine()).to_dict('records')
-    return df
+def get_user_updates(response:Response, user_id:str=None, length:int=None, update_type:str=None):
+    return update_user.get_user_updates_func(response, user_id, length, update_type)
 
 @app.get("/get_element_user_lists")
 def get_element_user_lists(response:Response, list_type:str, type_id:int,user_id:int=None, hash:str=None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if validateUser(user_id, hash):
-        lists = f'''select distinct l.list_name
-		,l.list_id
-		,e.element_id
-		,e.value
-		,l.list_type
-        ,true as in_list
-        from user_lists l
-        left join user_lists_elements e on e.list_id = l.list_id
-        where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}' and e.value = {type_id}
-        union all
-        select distinct list_name
-		,l.list_id
-		,0 as element_id
-		,0 as value
-		,l.list_type
-        ,false in_list
-        from user_lists l
-        where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}'
-		and l.list_id not in (
-			select distinct 
-			l.list_id
-        	from user_lists l
-        	left join user_lists_elements e on e.list_id = l.list_id
-        	where l.list_deleted is not true and l.user_id = {user_id} and l.list_type = '{list_type}' and e.value = {type_id}) '''
-        df = pd.read_sql(lists, con=engine()).to_dict('records')
-        return df
-
-def postUpdates(changes,list_id):
-    list_info = changes["list_info"]
-    additions = changes["additions"]
-    removals = changes["removals"]
-    order_changes = changes["order_changes"]
-    if "delete" in changes.keys(): delete = changes["delete"]
-    else: delete = None
-    conn = engine().connect()
-    if len(additions)>0:
-        for element in additions: conn.execute("INSERT INTO USER_LISTS_ELEMENTS (list_id,value) VALUES (%s, %s)",(list_id, element["value"]))
-    if len(removals)>0: 
-        for element in removals: conn.execute("DELETE FROM USER_LISTS_ELEMENTS WHERE list_id = '%s' and value = '%s'" % (list_id, element["value"]))
-    if len(order_changes)>0:
-        for n in range(len(order_changes)): 
-            conn.execute("UPDATE USER_LISTS_ELEMENTS SET ORDER_RANK = %s WHERE ELEMENT_ID = %s",(n, order_changes[n]["element_id"]))
-    if not list_info is False and len(list_info.keys())>1:
-        for element in list_info.keys():
-            if element not in ["hash", "user_id"]:
-                conn.execute(f"UPDATE USER_LISTS SET {element} = %s WHERE LIST_ID = %s",(list_info[element], list_id))
-    if delete: conn.execute(f"UPDATE USER_LISTS SET LIST_DELETED = true WHERE LIST_ID = {list_id}")
-    conn.execute(f"UPDATE USER_LISTS SET LIST_MODIFIED = CURRENT_TIMESTAMP WHERE LIST_ID = {list_id}")
-    conn.close()
-
+    '''Imports elements from a user_lists'''
+    return list_funcs.get_user_lists_elements(response, list_type, type_id, user_id, hash)
 
 @app.post("/update_user_list")
-async def update_user_list(response:Response, info:Request): #Update every list_info component, remove removed elements, add new ones
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["userData"]["user_id"], reqInfo["userData"]["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    list_id = reqInfo["list_info"]["list_id"]
-    postUpdates(reqInfo, list_id)
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+async def update_user_list(response:Response, info:Request): 
+    '''Update every list_info component, remove removed elements, add new ones'''
+    return await list_funcs.update_user_list_func(response, info)
 
 @app.get("/user_list_references")
 def user_list_references(response:Response, type:str, id:int):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    query = f'''SELECT l.*, u.user_name
-            from user_lists l
-            left join user_lists_elements e on e.list_id = l.list_id
-            left join users u on u.user_id = l.user_id
-            where l.list_type = '{type}s' and e.value = {id} '''
-    lists = pd.read_sql(query, con=engine())
-    if lists.empty: return {}
-    else: return lists.fillna('').to_dict('records')
+    return list_funcs.user_list_references_func(response, type, id)
 
 @app.post("/user_list_interaction")
-async def user_list_interaction(response:Response, info:Request):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    interaction_type = reqInfo["type"]
-    list_id = reqInfo["list_id"]
-    user_id = reqInfo["user_id"]
-    delete = reqInfo["delete"]
-    if not delete: 
-        query = f'''DELETE FROM USER_LISTS_{interaction_type}S WHERE LIST_ID = {list_id} and USER_ID = {user_id};
-            INSERT INTO USER_LISTS_{interaction_type}S (list_id, user_id) VALUES ({list_id}, {user_id})'''
-    else: query = "DELETE FROM USER_LISTS_%ss WHERE list_id = '%s' AND user_id = '%s'" % (interaction_type, list_id, user_id)
-    conn = engine().connect()
-    conn.execute(query)
-    conn.close()
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    response.status_code = 200
-    return response
+async def user_list_interactions(response:Response, info:Request):
+    '''Extracts user list interactions for the user'''
+    return await list_funcs.user_list_interactions_func(response, info)
 
 @app.get("/get_all_lists")
 def get_all_lists(response:Response,user_id:int = None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    query = read_sql("/Users/tarjeisandsnes/lectura_api/API_queries/list_of_lists.sql")
-    lists = pd.read_sql(query,con=engine())
-    if user_id:
-            interaction_query = f'''SELECT DISTINCT COALESCE(W.LIST_ID, L.LIST_ID, DL.LIST_ID) as list_id
-                ,CASE WHEN W.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS watchlist
-                ,CASE WHEN L.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS like
-                ,CASE WHEN DL.LIST_ID IS NULL THEN FALSE ELSE TRUE END AS dislike
-                from USER_LISTS_WATCHLISTS W 
-                FULL JOIN USER_LISTS_LIKES L ON L.USER_ID = W.USER_ID AND L.LIST_ID = W.LIST_ID
-                FULL JOIN USER_LISTS_DISLIKES DL ON DL.USER_ID = W.USER_ID AND DL.LIST_ID = W.LIST_ID
-            WHERE W.USER_ID = '{user_id}' OR L.USER_ID = '{user_id}' OR DL.USER_ID = '{user_id}' '''
-            list_interactions = pd.read_sql(interaction_query, con=engine())
-            if list_interactions.empty: lists = lists
-            else: lists = pd.merge(lists, list_interactions, how="left",on="list_id")
-    lists = lists.replace(np.nan,None).to_dict('records')
-    return lists
+    '''Extracts all user lists (not their elements)'''
+    return list_funcs.get_all_lists_func(response, user_id)
 
 @app.post("/upload_comment")
 async def upload_comment(response:Response, info:Request):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    reqInfo = await info.json()
-    user_id = reqInfo["user_id"]
-    if not validateUser(user_id, reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    comment = reqInfo["comment"]
-    parent_comment_id = reqInfo["parent_comment_id"]
-    if parent_comment_id is None: parent_comment_id = "null"
-    comment_type = reqInfo["type"]
-    comment_type_id = reqInfo["type_id"]
-    if comment_type_id is None: comment_type_id = "null"
-    query = '''INSERT INTO COMMENTS (user_id, comment_content, parent_comment_id, comment_type, comment_type_id) VALUES 
-        (%s, '%s', %s, '%s', %s) ''' % (user_id, comment, parent_comment_id, comment_type, comment_type_id)
-    conn = engine().connect()
-    conn.execute(query)
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+    '''Uploads new comment created by a user'''
+    return await comment_funcs.upload_comment_func(response, info)
 
 @app.post("/update_comment")
 async def update_comment(response:Response, info:Request):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response    
-    comment_id = reqInfo["comment_id"]
-    comment = reqInfo["comment"]
-    delete = reqInfo["delete"]
-    conn = engine().connect()
-    if delete or delete is False:
-        conn.execute(f'''UPDATE COMMENTS SET COMMENT_EDITED_AT = CURRENT_TIMESTAMP, COMMENT_DELETED = {delete} WHERE COMMENT_ID = {comment_id}''') 
-    else:
-        new_content = '''UPDATE COMMENTS SET COMMENT_CONTENT = %s, COMMENT_EDITED_AT = CURRENT_TIMESTAMP WHERE COMMENT_ID = %s'''
-        conn.execute(new_content, (comment, comment_id))
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+    '''Updates comment and adds edit dates'''
+    return await comment_funcs.update_comment_func(response, info)
 
 @app.get("/extract_comments")
-def comments(response:Response, comment_type, comment_type_id, user_id:int=None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if user_id is None: user_id = 0
-    else: user_id = user_id
-    query = f'''SELECT C.comment_id
-		,c.user_id
-		,c.parent_comment_id
-		,c.comment_type
-		,c.comment_type_id
-		,c.comment_content
-		,c.comment_created_at
-		,c.comment_edited_at
-        ,c.comment_deleted
-		,coalesce(cr.comment_likes,0) likes
-		,coalesce(cr.comment_dislikes,0) dislikes
-		,U.USER_NAME 
-        ,cr_user.comment_rating_type as user_interaction
-		FROM COMMENTS C JOIN USERS U ON U.USER_ID = C.USER_ID
-		LEFT JOIN (select comment_id 
-                        ,SUM(CASE WHEN comment_rating_type = 'like' then 1 else 0 end) comment_likes
-                        ,SUM(CASE WHEN comment_rating_type = 'dislike' then 1 else 0 end) comment_dislikes			 
-                    from comment_ratings group by comment_id) cr on cr.comment_id = c.comment_id
-                    left join (select comment_id, max(comment_rating_type) comment_rating_type 
-				   from comment_ratings WHERE user_id={str(user_id)} group by comment_id) cr_user on cr_user.comment_id = c.comment_id
-        WHERE COMMENT_TYPE = '{comment_type}' AND COMMENT_TYPE_ID = {comment_type_id}
-        ORDER BY comment_created_at desc '''
-    if comment_type == "text": 
-        query = query.replace("LEFT JOIN (", "LEFT JOIN TEXTS t on t.text_id = c.comment_type_id \n LEFT JOIN (").replace(",U.USER_NAME",",t.author_id \n ,U.USER_NAME")
-    if comment_type_id == 'null': query = query.replace("COMMENT_TYPE_ID = null", "COMMENT_TYPE_ID is null")
-    comments = pd.read_sql(query, con=engine()).replace(np.nan,None).to_dict('records')
-    def create_comment_tree(comments, parent_id=None):
-        tree = []
-        for comment in comments:
-            if comment['parent_comment_id'] == parent_id:
-                comment['replies'] = create_comment_tree(comments, comment['comment_id'])
-                tree.append(comment)
-        return tree
-    comment_tree = create_comment_tree(comments)
-    return comment_tree
+def get_comments(response:Response, comment_type, comment_type_id, user_id:int=None):
+    '''Extracts all comments of a particular location
+        @comment_type: text/author/blog/list'''
+    return comment_funcs.get_comments_func(response, comment_type, comment_type_id, user_id)
 
 @app.post("/comment_interaction")
-async def comment_interaction(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    interaction_type = reqInfo["type"]
-    user_id = reqInfo["user_id"]
-    comment_id = reqInfo["comment_id"]
-    conn = engine().connect()
-    if not interaction_type: conn.execute(f"DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id}")
-    else: conn.execute(f''' DELETE FROM comment_ratings WHERE user_id = {user_id} and comment_id = {comment_id};
-                    INSERT INTO comment_ratings (user_id, comment_id, comment_rating_type) VALUES ({user_id},{comment_id},'{interaction_type}') ''')
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+async def comment_interactions(response:Response, info:Request):
+    '''Extracts comment interactions for the user if validated'''
+    return await comment_funcs.comment_interactions_func(response, info)
 
 @app.post("/element_interaction")
-async def element_interaction(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    user_id = reqInfo["user_id"]
-    if not validateUser(user_id, reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response    
-    type = reqInfo["type"]
-    if type in ["checks", "watch", "favorites","dislikes"]: element_type = "text"
-    else: element_type = "author"
-    id = reqInfo["id"]
-    condition = reqInfo["condition"]
-    if not condition: query = f"DELETE FROM {type} WHERE USER_ID = {user_id} AND {element_type}_ID = {id};"
-    else: query = f'''DELETE FROM {type} WHERE USER_ID = {user_id} AND {element_type}_ID = {id};
-                        INSERT INTO {type} ({element_type}_id, user_id) VALUES ({id},{user_id});'''
-    conn = engine().connect()
-    conn.execute(query)
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+async def element_interactions(response:Response, info:Request):
+    '''Adds or removes an interaction to a particular page, i.e. favoriting a text, watchlisting an author'''
+    return await page_data.element_interactions_func(response, info)
 
 @app.get("/get_interactions")
 def get_interactions(response:Response, type:str, id:int, detailed:bool=None):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if detailed:
-        if type in ["checks", "watch", "favorites","dislikes"]: element_type = "text"
-        elif type in ["user_lists_likes", "user_lists_dislikes","user_lists_watchlists"]: element_type = "list"
-        else: element_type = "author"
-        query = f'''SELECT distinct user_name FROM {type} e
-                    LEFT JOIN USERS U on U.USER_ID = e.USER_ID
-                    WHERE e.{element_type}_ID = {id}
-                    '''
-        return pd_dict(query)
-    else:
-        if type=="text": 
-            query = f'''SELECT 
-                    (SELECT COUNT(*) FROM checks WHERE text_id = {id}) AS checks,
-                    (SELECT COUNT(*) FROM watch WHERE text_id = {id}) AS watch,
-                    (SELECT COUNT(*) FROM favorites WHERE text_id = {id}) AS favorites,
-                    (SELECT COUNT(*) FROM dislikes WHERE text_id = {id}) AS dislikes
-                        '''
-            return pd.read_sql(text(query), con=engine()).iloc[0].to_dict()
-
-@app.get("/source_data")
-def source_data(response:Response, author:str, title:str,label:str, type:str):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if type == "bnf":
-        url = "http://gallica.bnf.fr/SRU"
-        params = {
-            "version": "1.2", "operation": "searchRetrieve",
-            "query": f'''(dc.creator all "{author}") and (dc.title all "{title}")''',
-            "startRecord": "1","maximumRecords": "20"
-        }
-        columns = ["creator", "date","description","language","publisher","source","title","type","subject","identifier"]
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            xml_data = response.content
-            return parseXML(xml_data, columns)
-        else: return response.status_code
+    '''Extracts interactions to a particular page'''
+    return page_data.get_interactions_func(response, type, id, detailed)
 
 @app.get("/admin_data")
 def admin_data(response:Response, user_id:int, hash:str, data_type:str):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    if not validateUser(user_id, hash): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response    
-    if data_type=="users":
-        query = '''SELECT user_name, user_role, user_id, user_created from users where user_name not ilike '%%deleted%%' and user_role != 'administrator' '''
-        return pd_dict(query)
+    return update_user.admin_data_func(response, user_id, hash, data_type)
 
 @app.post("/update_user_role")
 async def update_user_role(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    change_user = reqInfo["change_user"]
-    new_role = reqInfo["new_role"]
-    if not validateUser(reqInfo["user_id"], reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    query = f"UPDATE USERS SET USER_ROLE = '{new_role}' WHERE USER_ID = {change_user}"
-    conn = engine().connect()
-    conn.execute(query)
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+    return await update_user.update_user_role_func(response, info)
 
 @app.get("/user_data")
 def user_data(response:Response, user_id:int):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    return profileViewData(user_id)
+    return update_user.user_data_func(response, user_id)
 
 @app.post("/update_user_data")
 async def update_user_data(response:Response, info:Request):
-    response.headers['Access-Control-Allow-Origin'] = "*"
-    reqInfo = await info.json()
-    change_type = reqInfo["change_type"]
-    change_value = reqInfo["change_value"]
-    user_id = reqInfo["user_id"]
-    if not validateUser(user_id, reqInfo["hash"]): 
-        response.body = json.dumps({"error":"user is not validated"}).encode("utf-8")
-        response.status_code = 400
-        return response
-    query = f'''UPDATE USERS SET {change_type} = '{change_value}' WHERE user_id = {user_id}'''
-    conn = engine().connect()
-    conn.execute(query)
-    conn.close()
-    response.status_code = 200
-    response.body = json.dumps(reqInfo).encode('utf-8')
-    return response
+    return await update_user.update_user_data_func(response, info)
 
-
+@app.get("/source_data")
+def source_data(response:Response, author:str, title:str,label:str, type:str):
+    '''Extracts data from external sources - currently only BNF (Bibliothèque Nationale Française)'''
+    return externals.source_data_func(response, author, title, label, type)
