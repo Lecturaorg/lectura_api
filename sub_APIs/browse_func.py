@@ -1,8 +1,52 @@
 import pandas as pd
 import json
-from main_data import returnLabel
 from sql_funcs import engine
 from sqlalchemy import text
+
+def returnLabel(type):
+    if type=="author":
+        return '''CONCAT(
+                SPLIT_PART(author_name, ', ', 1),
+                COALESCE(
+                    CASE
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL AND author_floruit IS NULL THEN ''
+                    WHEN author_birth_year IS NULL AND author_death_year IS NULL THEN CONCAT(' (fl.', left(author_floruit,4), ')')
+                    WHEN author_birth_year IS NULL THEN CONCAT(' (d.', 
+                            CASE 
+                                WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                                ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                            END,
+                        ')')
+                    WHEN author_death_year IS NULL THEN CONCAT(' (b.', 
+                        CASE
+                            WHEN author_birth_year<0 THEN CONCAT(ABS(author_birth_year)::VARCHAR, ' BC')
+                            ELSE concat(author_birth_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    ELSE CONCAT(' (', ABS(author_birth_year), '-',
+                        CASE 
+                            WHEN author_death_year<0 THEN CONCAT(ABS(author_death_year)::VARCHAR, ' BC')
+                            ELSE CONCAT(author_death_year::VARCHAR, ' AD')
+                        END,
+                        ')')
+                    END,'')) AS label '''
+    elif type=="text":
+        return '''text_title || 
+                case
+                    when text_original_publication_year is null then ' - ' 
+                    when text_original_publication_year <0 then ' (' || abs(text_original_publication_year) || ' BC' || ') - '
+                    else ' (' || text_original_publication_year || ' AD' || ') - '
+                end
+                || coalesce(text_author,'Unknown')
+                as label '''
+
+def labels_func(response, lang):
+    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
+    query = f'''SELECT label_loc, label_value from labels where language = 'en' '''
+#    query = f'''SELECT label_loc, label_value from labels where language = '{lang}' ''' #Change back later possibly..
+    labels = pd.read_sql(query,con=engine()).drop_duplicates()
+    labels = dict(zip(labels['label_loc'], labels['label_value']))
+    return labels
 
 def create_range_where_clause(column, range_dict):
     min_value = range_dict.get('min')

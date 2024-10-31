@@ -1,7 +1,4 @@
 from fastapi import FastAPI, Response, Request
-from sql_funcs import engine, read_sql
-import pandas as pd
-from main_data import returnLabel
 import uvicorn
 import os
 from sub_APIs import update_user, page_data, browse_func, official_lists, search_func, list_funcs, comment_funcs, externals
@@ -24,6 +21,26 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
     '''
     return page_data.page_data(type, id, by, user_id)
 
+@app.post("/get_texts")
+async def get_texts(response:Response,info:Request):
+    '''Gets text data for a particular author IDs'''
+    return await page_data.texts_data(response, info)
+
+@app.post("/delete_data")
+async def delete_data(response:Response,info:Request):
+    '''Deletes data for a page (i.e. author or text) if admin'''
+    return await page_data.delete_data_func(response, info)
+
+@app.post("/element_interaction")
+async def element_interactions(response:Response, info:Request):
+    '''Adds or removes an interaction to a particular page, i.e. favoriting a text, watchlisting an author'''
+    return await page_data.element_interactions_func(response, info)
+
+@app.get("/get_interactions")
+def get_interactions(response:Response, type:str, id:int, detailed:bool=None):
+    '''Extracts interactions to a particular page'''
+    return page_data.get_interactions_func(response, type, id, detailed)
+
 @app.post("/browse")
 async def browse(response:Response, info:Request):
     '''Provides data for the browsing page'''
@@ -37,22 +54,7 @@ def filters(response: Response, filter_type:str):
 @app.get("/labels")
 def labels(response: Response, lang:str = None):
     '''Extracts page labels depending on browser language/selected option by user'''
-    response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
-    query = f'''SELECT label_loc, label_value from labels where language = 'en' '''
-#    query = f'''SELECT label_loc, label_value from labels where language = '{lang}' ''' #Change back later possibly..
-    labels = pd.read_sql(query,con=engine()).drop_duplicates()
-    labels = dict(zip(labels['label_loc'], labels['label_value']))
-    return labels
-
-@app.post("/get_texts")
-async def get_texts(response:Response,info:Request):
-    '''Gets text data for a particular author IDs'''
-    return await page_data.texts_data(response, info)
-
-@app.post("/delete_data")
-async def delete_data(response:Response,info:Request):
-    '''Deletes data for a page (i.e. author or text) if admin'''
-    return await page_data.delete_data_func(response, info)
+    return browse_func.labels_func(response, lang)
 
 @app.get("/official_lists")
 def extract_list(response:Response, language=None, country=None, query_type=None):
@@ -85,6 +87,26 @@ async def delete_user(response:Response, info:Request):
     '''Deletes user and user session'''
     return update_user.delete_user_func(response, info)
 
+@app.get("/admin_data")
+def admin_data(response:Response, user_id:int, hash:str, data_type:str):
+    return update_user.admin_data_func(response, user_id, hash, data_type)
+
+@app.post("/update_user_role")
+async def update_user_role(response:Response, info:Request):
+    return await update_user.update_user_role_func(response, info)
+
+@app.get("/user_data")
+def user_data(response:Response, user_id:int):
+    return update_user.user_data_func(response, user_id)
+
+@app.post("/update_user_data")
+async def update_user_data(response:Response, info:Request):
+    return await update_user.update_user_data_func(response, info)
+
+@app.get("/get_user_updates")
+def get_user_updates(response:Response, user_id:str=None, length:int=None, update_type:str=None):
+    return update_user.get_user_updates_func(response, user_id, length, update_type)
+
 @app.post("/create_list")
 async def create_list(response:Response, info:Request):
     '''Creates a new list by type, list name, description, etc'''
@@ -94,10 +116,6 @@ async def create_list(response:Response, info:Request):
 def get_user_list(response:Response, list_id:int, user_id:int=None, hash:str=None):
     '''Gets data for a particular user list, user interactions if user id matches user list with the right hashing'''
     return list_funcs.get_user_list_func(response, list_id, user_id, hash)
-
-@app.get("/get_user_updates")
-def get_user_updates(response:Response, user_id:str=None, length:int=None, update_type:str=None):
-    return update_user.get_user_updates_func(response, user_id, length, update_type)
 
 @app.get("/get_element_user_lists")
 def get_element_user_lists(response:Response, list_type:str, type_id:int,user_id:int=None, hash:str=None):
@@ -143,32 +161,6 @@ def get_comments(response:Response, comment_type, comment_type_id, user_id:int=N
 async def comment_interactions(response:Response, info:Request):
     '''Extracts comment interactions for the user if validated'''
     return await comment_funcs.comment_interactions_func(response, info)
-
-@app.post("/element_interaction")
-async def element_interactions(response:Response, info:Request):
-    '''Adds or removes an interaction to a particular page, i.e. favoriting a text, watchlisting an author'''
-    return await page_data.element_interactions_func(response, info)
-
-@app.get("/get_interactions")
-def get_interactions(response:Response, type:str, id:int, detailed:bool=None):
-    '''Extracts interactions to a particular page'''
-    return page_data.get_interactions_func(response, type, id, detailed)
-
-@app.get("/admin_data")
-def admin_data(response:Response, user_id:int, hash:str, data_type:str):
-    return update_user.admin_data_func(response, user_id, hash, data_type)
-
-@app.post("/update_user_role")
-async def update_user_role(response:Response, info:Request):
-    return await update_user.update_user_role_func(response, info)
-
-@app.get("/user_data")
-def user_data(response:Response, user_id:int):
-    return update_user.user_data_func(response, user_id)
-
-@app.post("/update_user_data")
-async def update_user_data(response:Response, info:Request):
-    return await update_user.update_user_data_func(response, info)
 
 @app.get("/source_data")
 def source_data(response:Response, author:str, title:str,label:str, type:str):
