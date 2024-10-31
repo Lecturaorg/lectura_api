@@ -1,6 +1,7 @@
 import json
 from sql_funcs import engine, validateUser
 import pandas as pd
+import numpy as np
 async def upload_comment_func(response, info):
     response.headers["Access-Control-Allow-Origin"] = "*"
     reqInfo = await info.json()

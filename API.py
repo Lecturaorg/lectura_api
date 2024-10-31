@@ -19,7 +19,7 @@ def data(response: Response, type = None, id:int = None, by = None, user_id:int 
         @by: none if specific author or text data, when 'author' it extracts all texts for a particular author id
         @user_id: user_id if a user is online, extracts interaction data
     '''
-    return page_data.page_data(type, id, by, user_id)
+    return page_data.page_data(response, type, id, by, user_id)
 
 @app.post("/get_texts")
 async def get_texts(response:Response,info:Request):

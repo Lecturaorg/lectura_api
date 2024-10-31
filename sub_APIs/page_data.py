@@ -19,7 +19,7 @@ def mainData(type = None, limit = None):
     database = {'texts':texts, 'authors':authors}
     return database
 
-def page_data(type, id, by, user_id):
+def page_data(response, type, id, by, user_id):
     response.headers['Access-Control-Allow-Origin'] = "*" ##change to specific origin later (own website)
     if (type != None and id != None):
         if type == 'authors':
